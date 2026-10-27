@@ -138,7 +138,9 @@ function start() {
     if (!host) {
       host = document.createElement('div');
       host.id = 'actual-mortgage-tab';
-      Object.assign(host.style, { position: 'fixed', zIndex: '100', overflow: 'hidden' });
+      // Above page content (Schedules' sticky header is 200), below Actual's
+      // own chrome, menus and notifications (501 and up).
+      Object.assign(host.style, { position: 'fixed', zIndex: '500', overflow: 'hidden' });
       document.body.appendChild(host);
       app = mountMortgageApp(host);
     }
