@@ -36,7 +36,8 @@ export const styles = /* css */ `
   --s-pmi: #1baf7a;
   --s-escrow: #eda100;
 
-  position: absolute; inset: 0; overflow: auto;
+  /* --mt-top: height of Actual's top bar, set by the injected script. */
+  position: absolute; inset: var(--mt-top, 0px) 0 0 0; overflow: auto;
   background: var(--bg); color: var(--text);
   font: 13px/1.45 var(--font-family, 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
   font-feature-settings: 'tnum' 1;
@@ -104,6 +105,7 @@ export const styles = /* css */ `
 .mt-chart .grid { stroke: var(--border); stroke-width: 1; }
 .mt-chart .axis { fill: var(--muted); font-size: 11px; }
 .mt-chart .line { fill: none; stroke: var(--s-principal); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.mt-chart .line.projected { stroke-dasharray: 5 4; }
 .mt-chart .area { fill: var(--s-principal); opacity: 0.1; }
 .mt-chart .ref { stroke: var(--muted); stroke-width: 1; }
 .mt-chart .ref-label { fill: var(--muted); font-size: 11px; }
@@ -155,6 +157,33 @@ export const styles = /* css */ `
 .mt-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px; background: var(--header); color: var(--muted); }
 .mt-pill.paid { background: var(--good-bg); color: var(--good); }
 .mt-pill.flagged { background: var(--warn-bg); color: var(--warn); }
+.mt-pill.skipped { background: var(--header); color: var(--muted); border: 1px dashed var(--muted); }
+
+/* plain data tables inside cards */
+.mt-data { width: 100%; border-collapse: collapse; }
+.mt-data th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mt-data td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mt-data th:first-child, .mt-data td:first-child, .mt-data .l { text-align: left; }
+.mt-data tr:last-child td { border-bottom: 0; }
+.mt-data tr.total td { font-weight: 700; border-top: 1px solid var(--border); }
+.mt-data td.muted, .mt-data .muted { color: var(--muted); }
+.mt-data .neg { color: var(--bad); }
+.mt-scroll { overflow-x: auto; }
+
+/* equity parts: one hue, bar length = size of the part */
+.mt-parts { display: grid; gap: 9px; }
+.mt-part { display: grid; grid-template-columns: minmax(140px, 1.2fr) 2fr auto; gap: 12px; align-items: center; }
+.mt-part .bar { height: 10px; border-radius: 0 4px 4px 0; background: var(--s-principal); min-width: 2px; }
+.mt-part .bar.neg { background: var(--muted); opacity: 0.6; }
+.mt-part .v { font-weight: 600; text-align: right; white-space: nowrap; }
+.mt-part.total { border-top: 1px solid var(--border); padding-top: 9px; font-weight: 700; }
+
+.mt-three { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.mt-inline-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; align-items: end; }
+.mt-x { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; padding: 2px 6px; border-radius: 4px; }
+.mt-x:hover { color: var(--bad); background: var(--bad-bg); }
+.mt-input.secret:not(:focus) { -webkit-text-security: disc; }
+textarea.mt-input { min-height: 90px; resize: vertical; font: inherit; }
 
 /* table */
 .mt-table-wrap { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
@@ -190,5 +219,9 @@ export const styles = /* css */ `
 .mt-kv dd { margin: 0; text-align: right; font-weight: 600; }
 .mt-empty { text-align: center; color: var(--muted); padding: 28px 12px; }
 .mt-diff { font-size: 22px; font-weight: 700; }
+/* Actual's privacy mode: blur amounts, reveal on hover like Actual does. */
+.mt.privacy .mt-amt, .mt.privacy .mt-chart .axis.amount, .mt.privacy .mt-tip b,
+.mt.privacy .mt-secret, .mt.privacy .mt-prefix > .mt-input:not(:focus) { filter: blur(5px); transition: filter 0.1s; }
+.mt.privacy .mt-amt:hover, .mt.privacy .mt-secret:hover { filter: none; }
 .mt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 `;

@@ -1,9 +1,10 @@
-import type { LoanSetup } from '../engine/index.js';
+import type { Cents, EscrowKind, ISODate, LoanSetup, SkipMode } from '../engine/index.js';
 import type { CategoryGroup } from '../server/actual.js';
+import type { LoanDetails } from '../server/db.js';
 import type { Candidate, MatchResult, StateView } from '../server/service.js';
 import type { Resolution } from '../engine/index.js';
 
-export type { StateView, Candidate, MatchResult, CategoryGroup };
+export type { StateView, Candidate, MatchResult, CategoryGroup, LoanDetails };
 
 export class ApiError extends Error {
   constructor(
@@ -69,6 +70,13 @@ export interface MortgageClient {
   resolve(payment: number, resolution: Resolution, standing: boolean): Promise<StateView>;
   unmatch(payment: number): Promise<StateView>;
   setOffset(payment: number, amount: number): Promise<StateView>;
+  skip(payment: number, mode: SkipMode): Promise<StateView>;
+  unskip(payment: number): Promise<StateView>;
+  addHomeValue(value: { date: ISODate; value: Cents; source: string }): Promise<StateView>;
+  deleteHomeValue(id: number): Promise<StateView>;
+  addEscrowEntry(entry: { date: ISODate; kind: EscrowKind; amount: Cents; note: string }): Promise<StateView>;
+  deleteEscrowEntry(id: number): Promise<StateView>;
+  saveDetails(details: LoanDetails): Promise<StateView>;
 }
 
 export function createClient(base = '/mortgage-api', getToken: () => Promise<string | null> = readActualToken): MortgageClient {
@@ -101,5 +109,12 @@ export function createClient(base = '/mortgage-api', getToken: () => Promise<str
     resolve: (n, resolution, standing) => call('POST', `/months/${n}/resolve`, { resolution, standing }),
     unmatch: (n) => call('POST', `/months/${n}/unmatch`),
     setOffset: (n, amount) => call('PUT', `/months/${n}/offset`, { amount }),
+    skip: (n, mode) => call('POST', `/months/${n}/skip`, { mode }),
+    unskip: (n) => call('POST', `/months/${n}/unskip`),
+    addHomeValue: (v) => call('POST', '/home-values', v),
+    deleteHomeValue: (id) => call('DELETE', `/home-values/${id}`),
+    addEscrowEntry: (e) => call('POST', '/escrow/entries', e),
+    deleteEscrowEntry: (id) => call('DELETE', `/escrow/entries/${id}`),
+    saveDetails: (d) => call('PUT', '/details', d),
   };
 }

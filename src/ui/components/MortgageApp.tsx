@@ -1,21 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { LoanSetup } from '../../engine/index.js';
 import { ApiError, type MortgageClient, type StateView } from '../api.js';
-import { date, money } from '../format.js';
+import { date } from '../format.js';
 import { BalanceChart } from './BalanceChart.js';
+import { DetailsView } from './DetailsView.js';
+import { EquityView } from './EquityView.js';
+import { EscrowView } from './EscrowView.js';
 import { PaymentBreakdown } from './PaymentBreakdown.js';
 import { PmiCountdown } from './PmiCountdown.js';
 import { ReconcileView } from './ReconcileView.js';
 import { ScheduleView } from './ScheduleView.js';
 import { SetupForm } from './SetupForm.js';
 import { SummaryCards } from './SummaryCards.js';
+import { Amt } from './Amt.js';
 
-type Tab = 'overview' | 'reconcile' | 'schedule' | 'setup';
+type Tab = 'overview' | 'equity' | 'escrow' | 'reconcile' | 'schedule' | 'details' | 'setup';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
+  { id: 'equity', label: 'Equity' },
+  { id: 'escrow', label: 'Escrow' },
   { id: 'reconcile', label: 'Reconcile' },
   { id: 'schedule', label: 'Schedule' },
+  { id: 'details', label: 'Details' },
   { id: 'setup', label: 'Setup' },
 ];
 
@@ -99,7 +106,7 @@ export function MortgageApp({ client }: { client: MortgageClient }) {
       <Header
         subtitle={
           s && current
-            ? `Next: payment #${current.payment} of ${money(current.total)} due ${date(current.dueDate)}`
+            ? <>Next: payment #{current.payment} of <Amt cents={current.total} /> due {date(current.dueDate)}</>
             : state.setup
               ? 'Paid off'
               : 'Set up your loan to get started'
@@ -151,7 +158,7 @@ export function MortgageApp({ client }: { client: MortgageClient }) {
                 }
               />
               <div className="mt-row" style={{ marginTop: 10, color: 'var(--muted)' }}>
-                Total interest {money(s.totals.interest, { whole: true })} · PMI {money(s.totals.pmi, { whole: true })} · payoff{' '}
+                Total interest <Amt cents={s.totals.interest} whole /> · PMI <Amt cents={s.totals.pmi} whole /> · payoff{' '}
                 {date(s.rows.at(-1)?.dueDate, 'month')}
               </div>
             </div>
@@ -193,11 +200,15 @@ export function MortgageApp({ client }: { client: MortgageClient }) {
       )}
 
       {tab === 'schedule' && s && <ScheduleView rows={s.rows} currentPayment={s.currentPayment} onOpen={openMonth} />}
+
+      {tab === 'equity' && state.analysis && <EquityView state={state} client={client} onState={setState} />}
+      {tab === 'escrow' && state.analysis && <EscrowView state={state} client={client} onState={setState} />}
+      {tab === 'details' && <DetailsView state={state} client={client} onState={setState} />}
     </div>
   );
 }
 
-function Header({ subtitle, children }: { subtitle?: string; children?: React.ReactNode }) {
+function Header({ subtitle, children }: { subtitle?: React.ReactNode; children?: React.ReactNode }) {
   return (
     <div className="mt-head">
       <div>

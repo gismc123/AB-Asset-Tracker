@@ -1,5 +1,6 @@
 import type { LoanSummary } from '../../engine/index.js';
 import { date, money, percent } from '../format.js';
+import { Amt } from './Amt.js';
 
 /** The four headline numbers: payment number, balance, percent paid, equity. */
 export function SummaryCards({ summary }: { summary: LoanSummary }) {
@@ -17,11 +18,15 @@ export function SummaryCards({ summary }: { summary: LoanSummary }) {
       </div>
       <div className="mt-card">
         <div className="mt-kpi-label">Balance</div>
-        <div className="mt-kpi-value">{money(summary.balance)}</div>
+        <div className="mt-kpi-value"><Amt cents={summary.balance} /></div>
         <div className="mt-kpi-note">
-          {summary.scheduledBalance !== summary.balance
-            ? `Schedule expects ${money(summary.scheduledBalance)} by today`
-            : 'After your last reconciled payment'}
+          {summary.scheduledBalance !== summary.balance ? (
+            <>
+              Schedule expects <Amt cents={summary.scheduledBalance} /> by today
+            </>
+          ) : (
+            'After your last reconciled payment'
+          )}
         </div>
       </div>
       <div className="mt-card">
@@ -33,8 +38,19 @@ export function SummaryCards({ summary }: { summary: LoanSummary }) {
       </div>
       <div className="mt-card">
         <div className="mt-kpi-label">Equity</div>
-        <div className="mt-kpi-value">{money(summary.equity, { whole: true })}</div>
-        <div className="mt-kpi-note">{percent(summary.equityPercent)} of original home value</div>
+        {summary.homeValue && summary.marketEquity !== null ? (
+          <>
+            <div className="mt-kpi-value"><Amt cents={summary.marketEquity} whole /></div>
+            <div className="mt-kpi-note">
+              {percent(summary.marketEquityPercent ?? 0)} of <Amt cents={summary.homeValue.value} whole /> ({date(summary.homeValue.date, 'month')} estimate)
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mt-kpi-value"><Amt cents={summary.equity} whole /></div>
+            <div className="mt-kpi-note">{percent(summary.equityPercent)} of original home value</div>
+          </>
+        )}
       </div>
     </div>
   );

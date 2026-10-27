@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { MonthView } from '../../server/service.js';
 import { date, money } from '../format.js';
+import { Amt } from './Amt.js';
 
 interface Props {
   rows: MonthView[];
@@ -11,7 +12,7 @@ interface Props {
 type Filter = 'all' | 'upcoming' | 'reconciled';
 
 export function StatusPill({ status }: { status: MonthView['status'] }) {
-  const label = status === 'paid' ? 'Paid' : status === 'flagged' ? 'Flagged' : 'Scheduled';
+  const label = { paid: 'Paid', flagged: 'Flagged', skipped: 'Skipped', scheduled: 'Scheduled' }[status];
   return <span className={`mt-pill ${status}`}>{label}</span>;
 }
 
@@ -21,7 +22,7 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
   const currentRef = useRef<HTMLTableRowElement>(null);
 
   const shown = useMemo(() => {
-    if (filter === 'upcoming') return rows.filter((r) => r.status !== 'paid');
+    if (filter === 'upcoming') return rows.filter((r) => r.status === 'scheduled' || r.status === 'flagged');
     if (filter === 'reconciled') return rows.filter((r) => r.status !== 'scheduled');
     return rows;
   }, [rows, filter]);
@@ -79,13 +80,28 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
                   >
                     <td>{r.payment}</td>
                     <td className="l">{date(r.dueDate)}</td>
-                    <td>{money(r.scheduledPrincipal + r.pennyOffset)}</td>
-                    <td>{money(r.interest)}</td>
-                    <td className={r.extraPrincipal ? '' : 'muted'}>{r.extraPrincipal ? money(r.extraPrincipal) : '—'}</td>
-                    <td className={r.pmi ? '' : 'muted'}>{r.pmi ? money(r.pmi) : '—'}</td>
-                    <td>{money(r.escrow)}</td>
-                    <td style={{ fontWeight: 600 }}>{money(r.total)}</td>
-                    <td>{money(r.endingBalance)}</td>
+                    {r.skipped ? (
+                      <td colSpan={6} className="muted" style={{ textAlign: 'center' }}>
+                        {r.skipped === 'capitalize' ? (
+                          <>Skipped · <Amt cents={r.capitalizedInterest} /> interest added to the balance</>
+                        ) : (
+                          <>Skipped · <Amt cents={r.deferred} /> deferred to payoff</>
+                        )}
+                      </td>
+                    ) : (
+                      <>
+                        <td><Amt cents={r.scheduledPrincipal + r.pennyOffset} /></td>
+                        <td><Amt cents={r.interest} /></td>
+                        <td className={r.extraPrincipal ? '' : 'muted'}>{r.extraPrincipal ? <Amt cents={r.extraPrincipal} /> : '—'}</td>
+                        <td className={r.pmi ? '' : 'muted'}>{r.pmi ? <Amt cents={r.pmi} /> : '—'}</td>
+                        <td><Amt cents={r.escrow} /></td>
+                        <td style={{ fontWeight: 600 }} title={r.deferredRepaid ? 'Includes the deferred balance, due at payoff' : undefined}>
+                          <Amt cents={r.total} />
+                          {r.deferredRepaid > 0 && ' *'}
+                        </td>
+                      </>
+                    )}
+                    <td><Amt cents={r.endingBalance} /></td>
                     <td className="l">
                       <StatusPill status={r.status} />
                     </td>

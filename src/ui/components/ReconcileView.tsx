@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { MAX_PENNY_OFFSET, type Resolution } from '../../engine/index.js';
+import { MAX_PENNY_OFFSET, type Resolution, type SkipMode } from '../../engine/index.js';
 import type { MonthView, StateView } from '../../server/service.js';
 import type { Candidate, CategoryGroup, MortgageClient } from '../api.js';
 import { date, money } from '../format.js';
 import { PaymentBreakdown } from './PaymentBreakdown.js';
 import { StatusPill } from './ScheduleView.js';
+import { Amt } from './Amt.js';
 
 interface Props {
   client: MortgageClient;
@@ -24,6 +25,19 @@ const ANSWERS: { value: Resolution; title: string; text: string }[] = [
   { value: 'escrow', title: 'Escrow changed', text: 'Taxes or insurance changed. New escrow from this month on.' },
   { value: 'pmi', title: 'PMI changed', text: 'The PMI premium changed or stopped. New PMI from this month on.' },
   { value: 'extraPrincipal', title: 'Extra principal', text: 'You paid extra toward the balance. Later months recalculate.' },
+];
+
+const SKIP_MODES: { value: SkipMode; title: string; text: string }[] = [
+  {
+    value: 'capitalize',
+    title: 'Interest is added to the balance',
+    text: 'Typical skip-a-payment offer. The month’s interest is added to what you owe; the loan runs longer.',
+  },
+  {
+    value: 'defer',
+    title: 'Payment is deferred to payoff',
+    text: 'Typical after forbearance. The missed payment is due, interest-free, when the loan is paid off or sold.',
+  },
 ];
 
 /** Likeliest explanations first, matching the backend's suggestions. */
@@ -50,13 +64,14 @@ export function ReconcileView({ client, rows, payment, onPaymentChange, category
   const [error, setError] = useState<string | null>(null);
   const [standing, setStanding] = useState(false);
   const [offset, setOffset] = useState('');
+  const [skipMode, setSkipMode] = useState<SkipMode>('capitalize');
 
   useEffect(() => {
     client.categories().then(setGroups, (e: Error) => setError(e.message));
   }, [client]);
 
   const loadCandidates = useCallback(async () => {
-    if (!categoryId || !row || row.status === 'paid') {
+    if (!categoryId || !row || row.status === 'paid' || row.status === 'skipped') {
       setCands(null);
       return;
     }
@@ -96,6 +111,8 @@ export function ReconcileView({ client, rows, payment, onPaymentChange, category
     });
   const resolve = (answer: Resolution) => run(async () => onState(await client.resolve(payment, answer, standing)));
   const undo = () => run(async () => onState(await client.unmatch(payment)));
+  const skip = () => run(async () => onState(await client.skip(payment, skipMode)));
+  const unskip = () => run(async () => onState(await client.unskip(payment)));
   const saveOffset = () =>
     run(async () => {
       const cents = Math.round(Number(offset || '0') * 100);
@@ -130,7 +147,7 @@ export function ReconcileView({ client, rows, payment, onPaymentChange, category
             <>
               <h3>Reconciled</h3>
               <div className="mt-note good">
-                Matched to {money(row.match.transactionAmount)} on {date(row.match.transactionDate)}
+                Matched to <Amt cents={row.match.transactionAmount} /> on {date(row.match.transactionDate)}
                 {row.match.transactionPayee ? ` · ${row.match.transactionPayee}` : ''}
                 {row.match.resolution ? ` · explained as ${ANSWERS.find((a) => a.value === row.match!.resolution)?.title.toLowerCase()}` : ''}.
                 These amounts are locked.
@@ -142,13 +159,36 @@ export function ReconcileView({ client, rows, payment, onPaymentChange, category
             </>
           )}
 
+          {row.status === 'skipped' && (
+            <>
+              <h3>Skipped</h3>
+              <div className="mt-note">
+                {row.skipped === 'capitalize' ? (
+                  <>
+                    No payment this month. <Amt cents={row.capitalizedInterest} /> of interest is added to the balance, and the same
+                    monthly payment continues, so the loan runs a little longer.
+                  </>
+                ) : (
+                  <>
+                    No payment this month. <Amt cents={row.deferred} /> of principal and interest is deferred, interest-free, and due
+                    in one lump sum when the loan is paid off.
+                  </>
+                )}
+              </div>
+              <div className="mt-gap" />
+              <button type="button" className="mt-btn" disabled={busy} onClick={unskip}>
+                Undo skip
+              </button>
+            </>
+          )}
+
           {row.status === 'flagged' && row.match && (
             <>
               <h3>Doesn't match. What's the difference?</h3>
               <div className="mt-row" style={{ alignItems: 'baseline' }}>
-                <span className="mt-diff">{money(diff, { sign: true })}</span>
+                <span className="mt-diff"><Amt cents={diff} sign /></span>
                 <span style={{ color: 'var(--muted)' }}>
-                  bank {money(row.match.transactionAmount)} vs schedule {money(row.total)}
+                  bank <Amt cents={row.match.transactionAmount} /> vs schedule <Amt cents={row.total} />
                 </span>
               </div>
               <div className="mt-answers">
@@ -166,7 +206,7 @@ export function ReconcileView({ client, rows, payment, onPaymentChange, category
               {diff > 0 && (
                 <label className="mt-row" style={{ marginTop: 10, cursor: 'pointer' }}>
                   <input type="checkbox" checked={standing} onChange={(e) => setStanding(e.target.checked)} />
-                  If it's extra principal, keep paying {money(diff)} extra every month
+                  If it's extra principal, keep paying <Amt cents={diff} /> extra every month
                 </label>
               )}
               <div className="mt-row" style={{ marginTop: 12 }}>
@@ -227,9 +267,9 @@ export function ReconcileView({ client, rows, payment, onPaymentChange, category
                         </div>
                       </div>
                       <div>
-                        <div className="amt">{money(t.paid)}</div>
+                        <div className="amt"><Amt cents={t.paid} /></div>
                         <div className="meta" style={{ textAlign: 'right' }}>
-                          {t.matchesSchedule ? '✓ matches schedule' : `${money(t.difference, { sign: true })} vs schedule`}
+                          {t.matchesSchedule ? '✓ matches schedule' : <><Amt cents={t.difference} sign /> vs schedule</>}
                         </div>
                       </div>
                     </button>
@@ -250,6 +290,30 @@ export function ReconcileView({ client, rows, payment, onPaymentChange, category
                   <span style={{ color: 'var(--muted)', fontSize: 12 }}>Moves up to ±$1.00 into this month's principal.</span>
                 </div>
               </details>
+
+              <details style={{ marginTop: 10 }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Skipping this payment?</summary>
+                <p style={{ margin: '8px 0' }}>
+                  Only with your servicer's approval (a skip-a-payment offer, forbearance, or a deferral). How do they handle it?
+                </p>
+                <div className="mt-radio" role="radiogroup" aria-label="How the skipped payment is handled">
+                  {SKIP_MODES.map((m) => (
+                    <label key={m.value}>
+                      <input type="radio" name="mt-skip" checked={skipMode === m.value} onChange={() => setSkipMode(m.value)} />
+                      <span>
+                        <b>{m.title}</b>
+                        <small>{m.text}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-row" style={{ marginTop: 10 }}>
+                  <button type="button" className="mt-btn" disabled={busy} onClick={skip}>
+                    Mark payment #{row.payment} as skipped
+                  </button>
+                  <span style={{ color: 'var(--muted)', fontSize: 12 }}>No PMI or escrow is collected for a skipped month.</span>
+                </div>
+              </details>
             </>
           )}
 
@@ -261,13 +325,13 @@ export function ReconcileView({ client, rows, payment, onPaymentChange, category
         </div>
 
         <div className="mt-card">
-          <PaymentBreakdown row={row} title={row.status === 'paid' ? 'Locked amounts' : 'Scheduled'} />
+          <PaymentBreakdown row={row} title={row.status === 'paid' ? 'Locked amounts' : row.status === 'skipped' ? 'This month' : 'Scheduled'} />
           <div className="mt-gap" />
           <dl className="mt-kv">
             <dt>Balance before</dt>
-            <dd>{money(row.beginningBalance)}</dd>
+            <dd><Amt cents={row.beginningBalance} /></dd>
             <dt>Balance after</dt>
-            <dd>{money(row.endingBalance)}</dd>
+            <dd><Amt cents={row.endingBalance} /></dd>
           </dl>
         </div>
       </div>

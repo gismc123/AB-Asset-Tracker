@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { Cents, ISODate, ScheduleRow } from '../../engine/index.js';
 import { date, money } from '../format.js';
+import { Amt } from './Amt.js';
 
 interface Props {
   rows: ScheduleRow[];
@@ -59,7 +60,7 @@ export function BalanceChart({ rows, references, today }: Props) {
         {geo.ticks.map((t) => (
           <g key={t.v}>
             <line className="grid" x1={PAD.left} x2={W - PAD.right} y1={t.y} y2={t.y} />
-            <text className="axis" x={PAD.left - 8} y={t.y + 4} textAnchor="end">
+            <text className="axis amount" x={PAD.left - 8} y={t.y + 4} textAnchor="end">
               {`$${Math.round(t.v / 100_000)}k`}
             </text>
           </g>
@@ -100,7 +101,7 @@ export function BalanceChart({ rows, references, today }: Props) {
           className="mt-tip"
           style={{ left: `${(geo.x(hover + 1) / W) * 100}%`, top: `${(geo.y(h.endingBalance) / H) * 100}%` }}
         >
-          <b>{money(h.endingBalance)}</b>
+          <b><Amt cents={h.endingBalance} /></b>
           Payment #{h.payment} · {date(h.dueDate)}
         </div>
       )}

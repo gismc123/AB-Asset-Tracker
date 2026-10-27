@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { generateSchedule, standardPayment, validateSetup, type LoanSetup, type PmiRemovalRule } from '../../engine/index.js';
 import { centsToInput, date, money, parseDollars } from '../format.js';
+import { Amt } from './Amt.js';
 
 interface Props {
   initial: LoanSetup | null;
@@ -71,7 +72,7 @@ const RULES: { value: PmiRemovalRule; title: string; text: string }[] = [
 ];
 
 function Money({ id, label, hint, value, onChange, placeholder }: {
-  id: keyof Draft; label: string; hint?: string; value: string; onChange(v: string): void; placeholder?: string;
+  id: keyof Draft; label: string; hint?: React.ReactNode; value: string; onChange(v: string): void; placeholder?: string;
 }) {
   return (
     <div className="mt-field">
@@ -187,7 +188,7 @@ export function SetupForm({ initial, hasReconciled, onSave }: Props) {
             placeholder={calculated !== null ? centsToInput(calculated) : 'calculated'}
             hint={
               calculated !== null
-                ? `Calculated: ${money(calculated)}. Leave blank to use it, or type your statement's exact amount.`
+                ? <>Calculated: <Amt cents={calculated} />. Leave blank to use it, or type your statement's exact amount.</>
                 : 'Calculated from the amount, rate, and term.'
             }
           />
@@ -221,10 +222,10 @@ export function SetupForm({ initial, hasReconciled, onSave }: Props) {
         </div>
         {preview && preview.pmi.hasPmi && (
           <div className="mt-note" style={{ marginTop: 14 }}>
-            80% balance ({money(preview.pmi.request80.thresholdBalance, { whole: true })}) at payment #{preview.pmi.request80.payment} ·{' '}
+            80% balance (<Amt cents={preview.pmi.request80.thresholdBalance} whole />) at payment #{preview.pmi.request80.payment} ·{' '}
             {date(preview.pmi.request80.dueDate)}
             <br />
-            78% balance ({money(preview.pmi.auto78Scheduled.thresholdBalance, { whole: true })}) at payment #{preview.pmi.auto78Scheduled.payment} ·{' '}
+            78% balance (<Amt cents={preview.pmi.auto78Scheduled.thresholdBalance} whole />) at payment #{preview.pmi.auto78Scheduled.payment} ·{' '}
             {date(preview.pmi.auto78Scheduled.dueDate)}
           </div>
         )}
@@ -255,7 +256,7 @@ export function SetupForm({ initial, hasReconciled, onSave }: Props) {
       <div className="mt-row">
         {preview && (
           <span style={{ color: 'var(--muted)' }}>
-            First payment {money(preview.rows[0]!.total)} · {preview.rows.length} payments · payoff {date(preview.rows.at(-1)!.dueDate, 'month')}
+            First payment <Amt cents={preview.rows[0]!.total} /> · {preview.rows.length} payments · payoff {date(preview.rows.at(-1)!.dueDate, 'month')}
           </span>
         )}
         <span className="mt-spacer" />

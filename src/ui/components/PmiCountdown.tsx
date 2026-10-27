@@ -1,5 +1,6 @@
 import type { LoanSummary, PmiInfo, PmiRemovalRule } from '../../engine/index.js';
 import { date, duration, money } from '../format.js';
+import { Amt } from './Amt.js';
 
 const RULE_TEXT: Record<PmiRemovalRule, string> = {
   auto78Scheduled: 'Schedule drops PMI at the automatic 78% date (original schedule).',
@@ -30,14 +31,14 @@ export function PmiCountdown({ pmi, status, nextPayment, rule }: Props) {
     {
       key: 'r80',
       title: 'Request removal (80%)',
-      detail: `Balance ≤ ${money(pmi.request80.thresholdBalance, { whole: true })}, including extra principal`,
+      detail: <>Balance ≤ <Amt cents={pmi.request80.thresholdBalance} whole />, including extra principal</>,
       payment: pmi.request80.payment,
       due: pmi.request80.dueDate,
     },
     {
       key: 'a78',
       title: 'Automatic removal (78%)',
-      detail: `Original schedule reaches ${money(pmi.auto78Scheduled.thresholdBalance, { whole: true })}`,
+      detail: <>Original schedule reaches <Amt cents={pmi.auto78Scheduled.thresholdBalance} whole /></>,
       payment: pmi.auto78Scheduled.payment,
       due: pmi.auto78Scheduled.dueDate,
     },
@@ -62,7 +63,7 @@ export function PmiCountdown({ pmi, status, nextPayment, rule }: Props) {
           </div>
           <div className="mt-kpi-note">
             {status.dropDate ? `Drops ${date(status.dropDate)} · about ${duration(status.paymentsUntilDrop ?? 0)}` : ''} ·{' '}
-            {money(status.monthly)}/mo now
+            <Amt cents={status.monthly} />/mo now
           </div>
         </>
       ) : (

@@ -6,6 +6,8 @@ import { styles } from './styles.js';
 export interface MountedApp {
   /** Re-check Actual's theme (call after the user switches light/dark). */
   syncTheme(): void;
+  /** Blur amounts, following Actual's privacy mode. */
+  setPrivacy(on: boolean): void;
   unmount(): void;
 }
 
@@ -54,6 +56,7 @@ export function mountMortgageApp(host: HTMLElement, client: MortgageClient = cre
   syncTheme();
   return {
     syncTheme,
+    setPrivacy: (on) => container.classList.toggle('privacy', on),
     unmount() {
       for (const type of KEY_EVENTS) shadow.removeEventListener(type, keepKeysInside);
       root.unmount();

@@ -63,20 +63,43 @@ function findSidebar(link: HTMLElement): HTMLElement | null {
 }
 
 /**
- * Bottom edge of Actual's top bar (sync status, notifications, help) to the
- * right of the sidebar, so the mortgage screen sits below it and those
- * controls stay usable. Returns 0 if there is no such bar.
+ * Actual's top bar (sync status, notifications, help) to the right of the
+ * sidebar: the outermost short, wide element at the top of the window.
  */
-function titlebarBottom(left: number): number {
+function findTitlebar(left: number): HTMLElement | null {
   let el = document.elementFromPoint(window.innerWidth - 24, 6) as HTMLElement | null;
-  let bottom = 0;
+  let bar: HTMLElement | null = null;
   while (el && el !== document.body) {
     const r = el.getBoundingClientRect();
     if (r.height >= 120) break;
-    if (r.top <= 1 && r.width >= (window.innerWidth - left) * 0.5) bottom = r.bottom;
+    if (r.top <= 1 && r.width >= (window.innerWidth - left) * 0.5) bar = el;
     el = el.parentElement;
   }
-  return Math.round(bottom);
+  return bar;
+}
+
+/**
+ * The top bar's page-specific part: everything before its flexible spacer
+ * (e.g. the Budget page's month-count picker). The global controls after the
+ * spacer stay. A sidebar/menu toggle is kept wherever it is.
+ */
+function pageSpecificTitlebarParts(bar: HTMLElement): HTMLElement[] {
+  const parts: HTMLElement[] = [];
+  for (const child of Array.from(bar.children) as HTMLElement[]) {
+    if (Number.parseFloat(getComputedStyle(child).flexGrow) >= 1) return parts;
+    const keep = Array.from(child.querySelectorAll('[aria-label]')).some((e) => /sidebar|menu/i.test(e.getAttribute('aria-label') ?? ''));
+    if (!keep) parts.push(child);
+  }
+  return []; // no spacer found: the layout isn't what we expect, so touch nothing
+}
+
+/**
+ * Actual's privacy mode, read from its top bar button ("Enable privacy mode"
+ * / "Disable privacy mode"). Null when the button can't be found.
+ */
+function actualPrivacyEnabled(): boolean | null {
+  const button = document.querySelector('button[aria-label*="privacy" i]');
+  return button ? /disable/i.test(button.getAttribute('aria-label') ?? '') : null;
 }
 
 function buildItem(template: HTMLAnchorElement): HTMLAnchorElement {
@@ -115,16 +138,37 @@ function start() {
   let openPath: string | null = null;
   let themeTimer = 0;
 
+  // Page-specific top bar controls hidden while the mortgage screen is open.
+  const hiddenParts = new Set<HTMLElement>();
+  const showTitlebarParts = () => {
+    for (const el of hiddenParts) el.style.visibility = '';
+    hiddenParts.clear();
+  };
+
   const layout = () => {
     if (!host || !item) return;
     const sidebar = findSidebar(item);
     const left = sidebar ? Math.round(sidebar.getBoundingClientRect().right) : 0;
     // Hidden elements aren't hit-tested, so measure Actual's top bar under us.
     host.style.visibility = 'hidden';
-    const top = titlebarBottom(left);
+    const bar = findTitlebar(left);
     host.style.visibility = '';
-    Object.assign(host.style, { left: `${left}px`, top: `${top}px`, right: '0px', bottom: '0px' });
+    // Cover the whole content area, including the strip behind Actual's
+    // see-through top bar (pages draw there too), and start our content
+    // below the bar. The bar itself stays on top and usable.
+    const top = bar ? Math.round(bar.getBoundingClientRect().bottom) : 0;
+    Object.assign(host.style, { left: `${left}px`, top: '0px', right: '0px', bottom: '0px' });
+    host.style.setProperty('--mt-top', `${top}px`);
+    if (bar) {
+      for (const el of pageSpecificTitlebarParts(bar)) {
+        if (hiddenParts.has(el)) continue;
+        el.style.visibility = 'hidden';
+        hiddenParts.add(el);
+      }
+    }
   };
+
+  const syncPrivacy = () => app?.setPrivacy(actualPrivacyEnabled() ?? false);
 
   // While the mortgage screen is open, the sidebar should show Mortgage as the
   // current page, not the page underneath. Actual styles its current link
@@ -185,7 +229,12 @@ function start() {
       host.id = 'actual-mortgage-tab';
       // Above page content (Schedules' sticky header is 200), below Actual's
       // own chrome, menus and notifications (501 and up).
-      Object.assign(host.style, { position: 'fixed', zIndex: '500', overflow: 'hidden' });
+      Object.assign(host.style, {
+        position: 'fixed',
+        zIndex: '500',
+        overflow: 'hidden',
+        background: 'var(--color-pageBackground, #f4f5f8)',
+      });
       document.body.appendChild(host);
       app = mountMortgageApp(host);
     }
@@ -194,12 +243,14 @@ function start() {
     pushHash();
     openPath = location.pathname;
     app?.syncTheme();
+    syncPrivacy();
     layout();
     markActive(true);
     window.clearInterval(themeTimer);
     // Follow theme switches and leave when Actual navigates somewhere else.
     themeTimer = window.setInterval(() => {
       app?.syncTheme();
+      syncPrivacy();
       if (location.pathname !== openPath) close();
     }, 800);
   };
@@ -208,6 +259,7 @@ function start() {
   const close = ({ dropHash = false } = {}) => {
     window.clearInterval(themeTimer);
     if (host) host.style.display = 'none';
+    showTitlebarParts();
     openPath = null;
     markActive(false);
     if (dropHash && location.hash === HASH) history.replaceState(history.state, '', `${location.pathname}${location.search}`);
@@ -242,6 +294,9 @@ function start() {
     'click',
     (e) => {
       if (openPath === null || !(e.target instanceof Element) || host?.contains(e.target)) return;
+      // Follow Actual's privacy toggle right away rather than on the next tick.
+      // Actual relabels the button once it has saved the setting, so check a few times.
+      if (e.target.closest('button[aria-label*="privacy" i]')) for (const ms of [50, 300, 1000]) window.setTimeout(syncPrivacy, ms);
       const link = e.target.closest('a[href]');
       if (link && !link.hasAttribute(ITEM_ATTR)) close();
     },

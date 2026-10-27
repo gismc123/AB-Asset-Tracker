@@ -20,6 +20,8 @@ same one command it always was.
 3. [How the Mortgage tab gets into Actual](#3-how-the-mortgage-tab-gets-into-actual)
 4. [Configuration](#4-configuration)
 5. [The monthly workflow](#5-the-monthly-workflow)
+   (and [skipping a payment](#skipping-a-payment))
+5a. [Equity, escrow and loan details](#5a-equity-escrow-and-loan-details)
 6. [PMI behavior](#6-pmi-behavior)
 7. [Upgrading Actual safely](#7-upgrading-actual-safely)
 8. [Troubleshooting after an Actual update](#8-troubleshooting-after-an-actual-update)
@@ -31,14 +33,21 @@ same one command it always was.
 
 ## 1. What it does
 
-The Mortgage tab sits in Actual's sidebar, under the regular items. It has four screens:
+The Mortgage tab sits in Actual's sidebar, under the regular items. It has seven screens:
 
 | Screen | What you see |
 |---|---|
 | **Overview** | Payment number (e.g. *4 of 360*), current balance, percent paid, equity, a balance-over-time chart with the 80% / 78% PMI lines, the PMI countdown, and where this month's payment goes. |
-| **Reconcile** | One month at a time. Pick your mortgage category, click the matching transaction, and the month is marked paid. If the amount is off, you're asked why. |
-| **Schedule** | Every payment: due date, principal, interest, extra principal, PMI, escrow, total, balance, and status (*scheduled*, *flagged*, or *paid*). Click any row to reconcile it. |
+| **Equity** | Home value, what you owe, equity and loan-to-value. How the equity was built (down payment, principal paid, extra principal, home value change). Equity over time, the dates you reach 20%, 22%, 25%, 50%, 75% and 100% equity, and a table of principal, interest, PMI and escrow for this month, this quarter, the year to date, the loan to date, and the life of the loan. |
+| **Escrow** | The escrow account: escrow from each payment, the tax and insurance bills the servicer pays from it, a running balance, totals by year, and whether a year of collections covers a year of bills. |
+| **Reconcile** | One month at a time. Pick your mortgage category, click the matching transaction, and the month is marked paid. If the amount is off, you're asked why. You can also mark a month as skipped here. |
+| **Schedule** | Every payment: due date, principal, interest, extra principal, PMI, escrow, total, balance, and status (*scheduled*, *flagged*, *paid*, or *skipped*). Click any row to reconcile it. |
+| **Details** | Reference details: servicer, loan number, lender, insurance, tax parcel, PMI certificate, notes, and fields of your own. |
 | **Setup** | The loan details you enter once, with a live preview of the payment and PMI dates. |
+
+It follows Actual's light/dark theme and **privacy mode**: with privacy mode on
+(the eye icon in Actual's top bar), every dollar amount on the Mortgage screens
+is blurred until you hover over it, like Actual's own numbers.
 
 Under the hood:
 
@@ -49,8 +58,8 @@ Under the hood:
   unit), so the schedule matches your statement to the penny.
 - **Read-only toward Actual.** The tracker reads categories and
   transactions through the official [`@actual-app/api`](https://actualbudget.org/docs/api/)
-  and stores its own data (loan setup, adjustments, month status) in a small
-  SQLite file of its own. No code path in the tracker writes to your budget.
+  and stores its own data (loan setup, adjustments, month status, home value
+  estimates, escrow entries, loan details) in a small SQLite file of its own. No code path in the tracker writes to your budget.
 
 ## 2. Quick start (Docker)
 
@@ -249,6 +258,55 @@ total changing. Each unreconciled month has a small *Penny offset* field
 **Missed a month?** Months don't have to be reconciled in order. The Schedule
 screen shows every month's status; click any row to reconcile it.
 
+### Skipping a payment
+
+If your servicer approves skipping a payment (a skip-a-payment offer,
+forbearance, or a deferral), open that month in **Reconcile**, expand
+**Skipping this payment?**, and pick how your servicer handles it:
+
+| Choice | What the schedule does |
+|---|---|
+| **Interest is added to the balance** | Nothing is paid that month. The month's interest is added to what you owe, the same monthly payment continues, and the loan runs a little longer. Typical of skip-a-payment offers. |
+| **Payment is deferred to payoff** | Nothing is paid that month. The missed principal and interest go into a separate, interest-free balance that's due in one lump sum when the loan is paid off (or the home is sold). Typical after forbearance. |
+
+Either way, no PMI or escrow is collected for a skipped month. A skipped month
+has no bank transaction, so it counts as done once its due date passes. Equity
+counts any deferred amount as still owed. **Undo skip** removes it. Servicers
+differ, so check the terms in your approval letter.
+
+## 5a. Equity, escrow and loan details
+
+**Home value.** Equity starts out measured against the original home value
+from Setup. Add estimates on the **Equity** screen (an appraisal, the tax
+assessment, an online estimate) and the newest one is used for equity and
+loan-to-value. PMI dates always use the original value, as lenders do. If your
+estimate puts the loan-to-value at 80% or less while PMI is still on, the
+screen points out that many conventional loans allow removal based on a new
+appraisal. Your servicer sets the exact rules.
+
+**Where your payments went.** The table on the Equity screen has two modes.
+*Paid* counts reconciled payments by the date your bank paid them, the same
+way your servicer's year-end Form 1098 counts interest. *Scheduled* counts
+every payment by its due date, paid or not. The *Life of loan* column is
+always the full schedule, including payments still to come.
+
+**Escrow.** Escrow from each reconciled payment is added automatically. The
+bills it pays never pass through your bank, so record them from your
+servicer's statements or annual escrow analysis: property tax, homeowners or
+flood insurance, HOA dues, other bills, surplus refunds to you, and deposits
+(the initial escrow deposit at closing, or a shortage payment). Start with
+the initial deposit from your closing disclosure. The *Yearly cushion* compares
+a year of escrow collections at today's monthly amount with the bills paid
+in the last 12 months. A negative cushion usually means the next escrow
+analysis will raise your payment.
+
+**Loan details.** The **Details** screen is a place for reference
+information: servicer, loan number, contact details, insurance policy, tax
+parcel, PMI certificate, notes. It's stored only in the add-on's own
+database, is never sent to Actual, and is never included in the dashboard
+summary. Account, policy and certificate numbers stay masked until you click
+into them.
+
 ## 6. PMI behavior
 
 > **Important: confirm your own loan's terms.** The tracker assumes a
@@ -394,10 +452,14 @@ Example response (made-up numbers):
   "totalPayments": 360,
   "nextPayment": { "number": 5, "dueDate": "2025-08-01", "amount": 2583.12, "daysUntil": 12 },
   "balance": 318833.42,
+  "deferredBalance": 0,
   "scheduledBalance": 318833.42,
   "percentPaid": 0.36,
   "equity": 36166.58,
   "equityPercent": 10.19,
+  "homeValue": { "value": 368000, "asOf": "2025-06-01" },
+  "marketEquity": 49166.58,
+  "marketEquityPercent": 13.36,
   "payoffDate": "2055-03-01",
   "pmi": {
     "active": true,
@@ -414,7 +476,10 @@ Example response (made-up numbers):
 - Money is in dollars, dates are `YYYY-MM-DD`.
 - `paymentNumber` is the last *reconciled* payment. `balance` is after that
   payment; `scheduledBalance` is what the schedule expects by today.
-- `equity` is original home value minus balance.
+- `equity` is original home value minus what's owed (balance plus any
+  deferred payments). `homeValue`, `marketEquity` and `marketEquityPercent`
+  use your latest home value estimate and are `null` until you add one.
+- Loan details (servicer, account numbers, notes) are never included.
 - The endpoint never changes anything, and its token can't be used for the
   rest of the API.
 
@@ -441,7 +506,7 @@ which runs the same commands in the official Node image:
 **Preview the screens without Actual.** After `npm run build`, open
 `dist/ui/preview.html` in a browser. It runs the real components against an
 in-memory mock with sample data (`?theme=dark` for dark mode, `?empty` for
-first-run setup).
+first-run setup, `?privacy` for privacy mode).
 
 **Tests use no real Actual server or data.** Backend tests run against an
 in-memory database and a fake Actual source (`src/server/testing.ts`).
@@ -449,7 +514,7 @@ in-memory database and a fake Actual source (`src/server/testing.ts`).
 ## 11. Project layout
 
 ```
-src/engine/      Amortization, PMI milestones, reconciliation math, summary (pure, tested)
+src/engine/      Amortization, skips, PMI milestones, reconciliation, equity, escrow, period totals (pure, tested)
 src/server/      Backend: config, read-only Actual adapter, SQLite store, service, HTTP API
 src/ui/          Mortgage screens (React) + API client + styles
 src/inject/      The one script the proxy injects into Actual's page
@@ -478,6 +543,13 @@ All under `/mortgage-api`, and all except `health` and `v1/summary` need the
 | `POST /months/:n/resolve` | `{ resolution: rounding\|escrow\|pmi\|extraPrincipal, standing? }` |
 | `POST /months/:n/unmatch` | Undo a match and the adjustments it created |
 | `PUT /months/:n/offset` | `{ amount }`, manual penny offset in cents (±100) |
+| `POST /months/:n/skip` | `{ mode: capitalize\|defer }`, mark payment *n* as skipped |
+| `POST /months/:n/unskip` | Undo a skip |
+| `POST /home-values` | `{ date, value, source }`, add a home value estimate (cents) |
+| `DELETE /home-values/:id` | Remove an estimate |
+| `POST /escrow/entries` | `{ date, kind, amount, note }`, record an escrow bill or deposit (cents) |
+| `DELETE /escrow/entries/:id` | Remove an escrow entry |
+| `PUT /details` | `{ fields, custom }`, save loan details |
 | `GET /v1/summary` | Read-only dashboard summary (own token) |
 
 ## License

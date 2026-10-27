@@ -5,15 +5,20 @@
  */
 import {
   addDays,
+  analyzeEquity,
   compareToSchedule,
+  escrowReport,
+  periodBreakouts,
   generateSchedule,
   lockRow,
   resolutionToAdjustment,
   summarize,
   type Adjustment,
+  type EscrowEntry,
   type LoanSetup,
   type LockedPayment,
 } from '../engine/index.js';
+import type { LoanDetails, StoredHomeValue } from '../server/db.js';
 import type { MonthView, StateView } from '../server/service.js';
 import { ApiError, type Candidate, type MortgageClient } from './api.js';
 import { mountMortgageApp } from './mount.js';
@@ -48,6 +53,18 @@ function mockClient(empty: boolean): MortgageClient {
   const adjustments: { adj: Adjustment; source: number | null }[] = [];
   const months = new Map<number, Month>();
   const txns: Candidate[] = [];
+  // Made-up sample records.
+  const homeValues: StoredHomeValue[] = empty ? [] : [{ id: 1, date: '2025-09-01', value: 36_800_000, source: 'Online estimate' }];
+  const escrow: EscrowEntry[] = empty
+    ? []
+    : [
+        { id: 1, date: '2025-02-14', kind: 'deposit', amount: 164_000, note: 'Initial deposit at closing' },
+        { id: 2, date: '2025-06-20', kind: 'homeownersInsurance', amount: 216_000, note: 'Annual premium' },
+      ];
+  let details: LoanDetails = empty
+    ? { fields: {}, custom: [] }
+    : { fields: { servicerName: 'Sample Home Loans', loanNumber: '0000123456', loanType: 'Conventional' }, custom: [] };
+  let nextId = 10;
 
   const build = () => {
     const locked = new Map([...months].filter(([, m]) => m.locked).map(([k, m]) => [k, m.locked!]));
@@ -70,14 +87,17 @@ function mockClient(empty: boolean): MortgageClient {
   }
 
   const state = (): StateView => {
-    const base = { setup, settings: { categoryId }, source: { connected: true, lastSync: null, error: null }, today: TODAY, adjustments: [] };
-    if (!setup) return { ...base, schedule: null, summary: null };
+    const base = {
+      setup, settings: { categoryId }, source: { connected: true, lastSync: null, error: null }, today: TODAY, adjustments: [],
+      homeValues: [...homeValues].sort((a, b) => a.date.localeCompare(b.date)), details,
+    };
+    if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
     const s = build();
     const rows: MonthView[] = s.rows.map((r) => {
       const m = months.get(r.payment);
       return {
         ...r,
-        status: m?.status ?? 'scheduled',
+        status: m?.status ?? (r.skipped ? 'skipped' : 'scheduled'),
         match: m
           ? { transactionId: m.txn.id, transactionDate: m.txn.date, transactionAmount: -m.txn.amount, transactionPayee: m.txn.payee,
               difference: -m.txn.amount - r.total, resolution: (m.resolution as never) ?? null }
@@ -85,11 +105,17 @@ function mockClient(empty: boolean): MortgageClient {
       };
     });
     const paid = new Set([...months].filter(([, m]) => m.status === 'paid').map(([k]) => k));
+    const paidOn = new Map([...months].filter(([, m]) => m.status === 'paid').map(([k, m]) => [k, m.txn.date]));
     return {
       ...base,
       schedule: { piPayment: s.piPayment, calculatedPiPayment: s.calculatedPiPayment, totals: s.totals, pmi: s.pmi, rows,
-        currentPayment: rows.find((r) => r.status !== 'paid')?.payment ?? null },
-      summary: summarize(setup, s, paid, TODAY),
+        currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null },
+      summary: summarize(setup, s, paid, TODAY, homeValues),
+      analysis: {
+        equity: analyzeEquity(setup, s, paid, TODAY, homeValues),
+        periods: { paid: periodBreakouts(s.rows, paidOn, TODAY, 'paid'), scheduled: periodBreakouts(s.rows, paidOn, TODAY, 'scheduled') },
+        escrow: escrowReport(s.rows, paidOn, escrow, TODAY),
+      },
     };
   };
 
@@ -134,10 +160,26 @@ function mockClient(empty: boolean): MortgageClient {
       if (amount) adjustments.push({ adj: { kind: 'pennyOffset', payment: n, amount }, source: null });
       return later(state());
     },
+    async skip(n, mode) {
+      if (months.has(n)) throw new ApiError(409, `Payment ${n} is already matched to a bank transaction. Undo that first.`);
+      await this.unskip(n);
+      adjustments.push({ adj: { kind: 'skip', payment: n, mode }, source: null });
+      return later(state());
+    },
+    async unskip(n) {
+      for (let i = adjustments.length - 1; i >= 0; i--) { const a = adjustments[i]!.adj; if (a.kind === 'skip' && a.payment === n) adjustments.splice(i, 1); }
+      return later(state());
+    },
+    async addHomeValue(v) { homeValues.push({ id: nextId++, ...v }); return later(state()); },
+    async deleteHomeValue(id) { homeValues.splice(homeValues.findIndex((v) => v.id === id), 1); return later(state()); },
+    async addEscrowEntry(e) { escrow.push({ id: nextId++, ...e }); return later(state()); },
+    async deleteEscrowEntry(id) { escrow.splice(escrow.findIndex((e) => e.id === id), 1); return later(state()); },
+    async saveDetails(d) { details = d; return later(state()); },
   };
 }
 
 const params = new URLSearchParams(location.search);
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark');
 const host = document.getElementById('app')!;
-mountMortgageApp(host, mockClient(params.has('empty')));
+const app = mountMortgageApp(host, mockClient(params.has('empty')));
+if (params.has('privacy')) app.setPrivacy(true);
