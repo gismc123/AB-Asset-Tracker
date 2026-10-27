@@ -1,0 +1,38 @@
+{
+  "name": "actual-mortgage-tracker",
+  "version": "0.1.0",
+  "description": "A Mortgage tab for a stock Actual Budget instance: amortization, PMI drop-off, equity, and monthly reconciliation.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:ui",
+    "build:server": "tsc -p tsconfig.build.json",
+    "build:ui": "node scripts/build-ui.mjs",
+    "start": "node dist/server/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@actual-app/api": "26.10.0",
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/supertest": "^6.0.3",
+    "esbuild": "^0.25.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "supertest": "^7.1.0",
+    "typescript": "~5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

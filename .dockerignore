@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+node_modules
+.npm-cache
+dist
+data
+actual-data
+certs
+secrets
+coverage
+*.sqlite
+*.db

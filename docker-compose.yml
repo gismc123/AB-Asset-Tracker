@@ -1,0 +1,27 @@
+# Bundled stack: stock Actual + the mortgage add-on.
+#
+#   docker compose up -d            start everything
+#   docker compose pull actual && docker compose up -d actual
+#                                   monthly Actual update (touches nothing else)
+#
+# Open https://<host>:${PROXY_PORT} (default 5007) to use Actual with the
+# Mortgage tab. In .env use:
+#   ACTUAL_SERVER_URL=http://actual:5006
+#   ACTUAL_UPSTREAM=http://actual:5006
+#   ACTUAL_CA_CERT=          (empty: traffic stays inside the Docker network)
+
+include:
+  - compose.addon.yml
+
+services:
+  actual:
+    # The stock image, unmodified. Nothing in this repo patches it.
+    image: docker.io/actualbudget/actual-server:latest
+    restart: unless-stopped
+    volumes:
+      - ${ACTUAL_DATA_DIR:-./actual-data}:/data
+    expose:
+      - "5006"
+    # Uncomment to also reach plain Actual (without the tab) directly:
+    # ports:
+    #   - "5006:5006"

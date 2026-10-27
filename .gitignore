@@ -1,0 +1,41 @@
+# --- Secrets and credentials -------------------------------------------
+# Never commit these. The Actual server URL and password live in .env.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+certs/
+actual-credentials*
+**/user-token*
+
+# --- Local databases and Actual data -----------------------------------
+# The tracker's own SQLite database, and the local budget cache that
+# @actual-app/api downloads. Both can contain real financial data.
+data/
+actual-data/
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+
+# --- Dependencies and build output -------------------------------------
+node_modules/
+.npm-cache/
+dist/
+coverage/
+*.tsbuildinfo
+
+# --- Editor / OS noise --------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+npm-debug.log*

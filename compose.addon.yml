@@ -1,0 +1,40 @@
+# The two add-on containers: the mortgage backend and the injecting proxy.
+# Neither of them is Actual. Updating Actual never touches these, and
+# rebuilding these never touches Actual.
+#
+# You normally don't run this file directly. Use one of:
+#   docker compose up -d                                   (bundled: Actual + add-on)
+#   docker compose -f compose.existing-actual.yml up -d    (add-on in front of an Actual you already run)
+
+services:
+  mortgage-backend:
+    build: .
+    image: actual-mortgage-tracker-backend:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "3100"
+      DATA_DIR: /data
+      # Lets Node trust a self-signed Actual certificate (empty = system CAs only).
+      NODE_EXTRA_CA_CERTS: ${ACTUAL_CA_CERT:-}
+    volumes:
+      - ./data:/data
+      - ${ACTUAL_CERT_DIR:-./certs}:/certs:ro
+    expose:
+      - "3100"
+
+  mortgage-proxy:
+    build: ./proxy
+    image: actual-mortgage-tracker-proxy:local
+    restart: unless-stopped
+    environment:
+      ACTUAL_UPSTREAM: ${ACTUAL_UPSTREAM:?Set ACTUAL_UPSTREAM in .env}
+      MORTGAGE_BACKEND: http://mortgage-backend:3100
+    volumes:
+      # Read-write only so a self-signed pair can be generated on first start
+      # when the folder is empty. Existing files are never overwritten.
+      - ${ACTUAL_CERT_DIR:-./certs}:/certs
+    ports:
+      - "${PROXY_PORT:-5007}:8443"
+    depends_on:
+      - mortgage-backend
