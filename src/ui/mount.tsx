@@ -39,6 +39,14 @@ export function mountMortgageApp(host: HTMLElement, client: MortgageClient = cre
   container.className = 'mt';
   shadow.append(style, container);
 
+  // Actual's page-wide shortcuts skip keys typed into inputs, but from outside
+  // the shadow root every key looks like it came from `host`, so they would
+  // swallow keys such as "0". React has already handled the event by the time
+  // it bubbles here.
+  const KEY_EVENTS = ['keydown', 'keypress', 'keyup'] as const;
+  const keepKeysInside = (e: Event) => e.stopPropagation();
+  for (const type of KEY_EVENTS) shadow.addEventListener(type, keepKeysInside);
+
   const root: Root = createRoot(container);
   root.render(<MortgageApp client={client} />);
 
@@ -47,6 +55,7 @@ export function mountMortgageApp(host: HTMLElement, client: MortgageClient = cre
   return {
     syncTheme,
     unmount() {
+      for (const type of KEY_EVENTS) shadow.removeEventListener(type, keepKeysInside);
       root.unmount();
       shadow.innerHTML = '';
     },
