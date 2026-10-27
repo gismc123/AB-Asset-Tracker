@@ -1,0 +1,16 @@
+{
+  "_comment": "Made-up sample loan. Not anyone's real numbers. Money is in cents.",
+  "originalAmount": 32000000,
+  "annualRatePercent": 6.5,
+  "termYears": 30,
+  "openDate": "2025-02-14",
+  "firstPaymentDate": "2025-04-01",
+  "paymentDay": 1,
+  "piPaymentOverride": null,
+  "originalHomeValue": 35500000,
+  "pmiMonthly": 14800,
+  "pmiStartDate": null,
+  "pmiRemovalRule": "auto78Scheduled",
+  "escrowMonthly": 41250,
+  "extraPrincipal": 0
+}

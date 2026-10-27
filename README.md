@@ -26,3 +26,13 @@ src/inject/   The one script the proxy injects into Actual's page
 proxy/        nginx reverse proxy that passes Actual through and injects the script
 examples/     Made-up sample loan data (never real numbers)
 ```
+
+## Development
+
+The math lives in `src/engine` and has no dependencies. All money is integer
+cents. Run the tests with Node 22+, or through Docker if the host has no Node:
+
+```sh
+npm install && npm test            # with Node installed
+./scripts/npm.sh install && ./scripts/npm.sh test   # Docker only
+```
