@@ -13,7 +13,7 @@ let source: FakeSource;
 beforeEach(() => {
   source = new FakeSource();
   const service = new MortgageService(new Store(':memory:'), source, () => '2025-06-15');
-  app = createApp({ service, validateToken: async (t) => t === GOOD, uiDir: '/nonexistent' });
+  app = createApp({ service, validateToken: async (t) => t === GOOD, uiDir: '/nonexistent', summaryToken: undefined });
 });
 
 const authed = (r: request.Test) => r.set('x-actual-token', GOOD);
@@ -62,6 +62,58 @@ describe('HTTP API', () => {
     expect(res.body.details.problems.length).toBeGreaterThan(0);
     const bad = await authed(request(app).post('/mortgage-api/months/abc/match').send({}));
     expect(bad.status).toBe(400);
+  });
+});
+
+describe('read-only summary endpoint', () => {
+  const SUMMARY = 'mirror-token-example';
+  let svc: MortgageService;
+  const withToken = () => createApp({ service: svc, validateToken: async () => false, uiDir: '/nonexistent', summaryToken: SUMMARY });
+
+  beforeEach(() => {
+    svc = new MortgageService(new Store(':memory:'), new FakeSource(), () => '2025-06-15');
+  });
+
+  it('is disabled unless SUMMARY_TOKEN is set', async () => {
+    expect((await request(app).get('/mortgage-api/v1/summary?token=anything')).status).toBe(404);
+  });
+
+  it('requires the summary token, by query or bearer header', async () => {
+    svc.saveSetup(SAMPLE_SETUP);
+    const a = withToken();
+    expect((await request(a).get('/mortgage-api/v1/summary')).status).toBe(401);
+    expect((await request(a).get('/mortgage-api/v1/summary?token=wrong')).status).toBe(401);
+    expect((await request(a).get(`/mortgage-api/v1/summary?token=${SUMMARY}`)).status).toBe(200);
+    expect((await request(a).get('/mortgage-api/v1/summary').set('authorization', `Bearer ${SUMMARY}`)).status).toBe(200);
+  });
+
+  it('says so when the loan is not set up', async () => {
+    expect((await request(withToken()).get(`/mortgage-api/v1/summary?token=${SUMMARY}`)).status).toBe(409);
+  });
+
+  it('returns payment number, balance, percent paid, equity, and PMI countdown', async () => {
+    svc.saveSetup(SAMPLE_SETUP);
+    const res = await request(withToken()).get(`/mortgage-api/v1/summary?token=${SUMMARY}`);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body).toMatchObject({
+      version: 1,
+      asOf: '2025-06-15',
+      paymentNumber: 0,
+      totalPayments: 360,
+      balance: 320_000,
+      percentPaid: 0,
+      equity: 35_000,
+      nextPayment: { number: 1, dueDate: '2025-04-01' },
+      pmi: { active: true, monthly: 148 },
+    });
+    expect(res.body.pmi.paymentsUntilDrop).toBeGreaterThan(0);
+    expect(res.body.pmi.dropDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(res.body.pmi.requestRemovalDate < res.body.pmi.automaticRemovalDate).toBe(true);
+  });
+
+  it('never accepts the summary token for the full API', async () => {
+    const res = await request(withToken()).get('/mortgage-api/state').set('x-actual-token', SUMMARY);
+    expect(res.status).toBe(401);
   });
 });
 

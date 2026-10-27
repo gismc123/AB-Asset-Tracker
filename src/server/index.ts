@@ -26,6 +26,7 @@ function main() {
     service,
     validateToken: actualTokenValidator(config.actual.serverURL),
     uiDir: config.uiDir,
+    summaryToken: config.summaryToken,
   });
 
   const server = app.listen(config.port, () => {

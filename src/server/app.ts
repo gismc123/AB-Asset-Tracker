@@ -1,7 +1,9 @@
+import { timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { SourceUnavailable } from './actual.js';
+import type { LoanSummary } from '../engine/index.js';
 import type { TokenValidator } from './auth.js';
 import { HttpError, type MortgageService } from './service.js';
 
@@ -10,11 +12,20 @@ export interface AppDeps {
   validateToken: TokenValidator;
   /** Folder with the built inject.js. */
   uiDir: string;
+  /** Token for the read-only summary endpoint. Undefined = endpoint disabled. */
+  summaryToken: string | undefined;
 }
 
 /** Mount points shared with the proxy config. */
 export const API_PREFIX = '/mortgage-api';
 export const ADDON_PREFIX = '/mortgage-addon';
+
+function sameToken(given: string | undefined, expected: string): boolean {
+  if (!given) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 const paymentParam = (req: Request) => {
   const n = Number(req.params.payment);
@@ -45,7 +56,22 @@ export function createApp(deps: AppDeps) {
   const api = express.Router();
 
   api.get('/health', (_req, res) => {
-    res.json({ ok: true, actual: service.state().source });
+    res.json({ ok: true, actual: service.sourceStatus() });
+  });
+
+  // --- read-only summary for dashboards (e.g. a future MagicMirror module) --
+  // Opt-in with its own token, because a dashboard can't log in to Actual.
+  api.get('/v1/summary', (req, res) => {
+    if (!deps.summaryToken) {
+      throw new HttpError(404, 'The summary endpoint is disabled. Set SUMMARY_TOKEN in .env to enable it.');
+    }
+    const header = req.get('authorization')?.replace(/^Bearer\s+/i, '');
+    const given = typeof req.query.token === 'string' ? req.query.token : header;
+    if (!sameToken(given, deps.summaryToken)) throw new HttpError(401, 'Missing or wrong summary token');
+    const summary = service.summary();
+    if (!summary) throw new HttpError(409, 'The loan has not been set up yet');
+    res.set('Cache-Control', 'no-store');
+    res.json(summaryForDisplay(summary));
   });
 
   // --- everything below needs a valid Actual session ------------------------
@@ -110,4 +136,37 @@ export function createApp(deps: AppDeps) {
   });
 
   return app;
+}
+
+/**
+ * The public summary shape, version 1. Flat and dashboard-friendly: money is
+ * in dollars (numbers), dates are YYYY-MM-DD. Add fields freely; never rename
+ * or remove one without bumping `version`.
+ */
+export function summaryForDisplay(s: LoanSummary) {
+  const dollars = (c: number) => c / 100;
+  return {
+    version: 1,
+    asOf: s.asOf,
+    paymentNumber: s.lastPaidPayment ?? 0,
+    totalPayments: s.totalPayments,
+    nextPayment: s.nextPayment
+      ? { number: s.nextPayment.payment, dueDate: s.nextPayment.dueDate, amount: dollars(s.nextPayment.total), daysUntil: s.nextPayment.daysUntil }
+      : null,
+    balance: dollars(s.balance),
+    scheduledBalance: dollars(s.scheduledBalance),
+    percentPaid: s.percentPaid,
+    equity: dollars(s.equity),
+    equityPercent: s.equityPercent,
+    payoffDate: s.payoffDate,
+    pmi: {
+      active: s.pmi.active,
+      monthly: dollars(s.pmi.monthly),
+      dropDate: s.pmi.dropDate,
+      paymentsUntilDrop: s.pmi.paymentsUntilDrop,
+      daysUntilDrop: s.pmi.daysUntilDrop,
+      requestRemovalDate: s.pmi.request80Date,
+      automaticRemovalDate: s.pmi.auto78Date,
+    },
+  };
 }

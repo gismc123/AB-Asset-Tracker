@@ -198,6 +198,10 @@ export class MortgageService {
     };
   }
 
+  sourceStatus(): SourceStatus {
+    return this.source.status();
+  }
+
   /** Read-only snapshot for dashboards. Null when the loan is not set up. */
   summary(): LoanSummary | null {
     const setup = this.store.getSetup();
