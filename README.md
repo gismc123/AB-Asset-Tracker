@@ -472,3 +472,7 @@ All under `/mortgage-api`, and all except `health` and `v1/summary` need the
 | `POST /months/:n/unmatch` | Undo a match and the adjustments it created |
 | `PUT /months/:n/offset` | `{ amount }`, manual penny offset in cents (±100) |
 | `GET /v1/summary` | Read-only dashboard summary (own token) |
+
+## License
+
+MIT. See [LICENSE](LICENSE). Not affiliated with or endorsed by the Actual Budget project.

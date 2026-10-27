@@ -2,6 +2,7 @@
   "name": "actual-mortgage-tracker",
   "version": "0.1.0",
   "description": "A Mortgage tab for a stock Actual Budget instance: amortization, PMI drop-off, equity, and monthly reconciliation.",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {
