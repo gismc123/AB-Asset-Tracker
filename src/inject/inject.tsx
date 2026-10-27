@@ -57,6 +57,23 @@ function findSidebar(link: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/**
+ * Bottom edge of Actual's top bar (sync status, notifications, help) to the
+ * right of the sidebar, so the mortgage screen sits below it and those
+ * controls stay usable. Returns 0 if there is no such bar.
+ */
+function titlebarBottom(left: number): number {
+  let el = document.elementFromPoint(window.innerWidth - 24, 6) as HTMLElement | null;
+  let bottom = 0;
+  while (el && el !== document.body) {
+    const r = el.getBoundingClientRect();
+    if (r.height >= 120) break;
+    if (r.top <= 1 && r.width >= (window.innerWidth - left) * 0.5) bottom = r.bottom;
+    el = el.parentElement;
+  }
+  return Math.round(bottom);
+}
+
 function buildItem(template: HTMLAnchorElement): HTMLAnchorElement {
   const item = template.cloneNode(true) as HTMLAnchorElement;
   item.setAttribute(ITEM_ATTR, '');
@@ -92,13 +109,16 @@ function start() {
   let item: HTMLAnchorElement | null = null;
   let openPath: string | null = null;
   let themeTimer = 0;
-  const watchedSidebars = new WeakSet<HTMLElement>();
 
   const layout = () => {
     if (!host || !item) return;
     const sidebar = findSidebar(item);
     const left = sidebar ? Math.round(sidebar.getBoundingClientRect().right) : 0;
-    Object.assign(host.style, { left: `${left}px`, top: '0px', right: '0px', bottom: '0px' });
+    // Hidden elements aren't hit-tested, so measure Actual's top bar under us.
+    host.style.visibility = 'hidden';
+    const top = titlebarBottom(left);
+    host.style.visibility = '';
+    Object.assign(host.style, { left: `${left}px`, top: `${top}px`, right: '0px', bottom: '0px' });
   };
 
   const markActive = (active: boolean) => {
@@ -122,7 +142,8 @@ function start() {
       document.body.appendChild(host);
       app = mountMortgageApp(host);
     }
-    host.hidden = false;
+    // Not the `hidden` attribute: Actual's CSS overrides its display:none.
+    host.style.display = 'block';
     openPath = location.pathname;
     app?.syncTheme();
     layout();
@@ -137,7 +158,7 @@ function start() {
 
   const close = () => {
     window.clearInterval(themeTimer);
-    if (host) host.hidden = true;
+    if (host) host.style.display = 'none';
     openPath = null;
     markActive(false);
   };
@@ -154,20 +175,19 @@ function start() {
     });
     template.insertAdjacentElement('afterend', item);
     if (openPath !== null) markActive(true);
-
-    // Any other sidebar link closes the mortgage screen.
-    const sidebar = findSidebar(item);
-    if (!sidebar || watchedSidebars.has(sidebar)) return;
-    watchedSidebars.add(sidebar);
-    sidebar.addEventListener(
-      'click',
-      (e) => {
-        const a = (e.target as Element).closest?.('a, button');
-        if (a && !a.hasAttribute(ITEM_ATTR) && openPath !== null) close();
-      },
-      true,
-    );
   };
+
+  // Following any of Actual's links (sidebar, top bar) leaves the mortgage
+  // screen. Clicks inside it are retargeted to `host`, so they don't count.
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (openPath === null || !(e.target instanceof Element) || host?.contains(e.target)) return;
+      const link = e.target.closest('a[href]');
+      if (link && !link.hasAttribute(ITEM_ATTR)) close();
+    },
+    true,
+  );
 
   let queued = false;
   const observer = new MutationObserver(() => {
