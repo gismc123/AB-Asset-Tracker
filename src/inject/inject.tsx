@@ -33,17 +33,22 @@ function visible(el: Element): boolean {
   return r.width > 0 && r.height > 0;
 }
 
-/** A visible sidebar link we can copy, preferring one that is not the active page. */
-function findTemplateLink(): HTMLAnchorElement | null {
+/**
+ * Visible sidebar links: `anchor` is the one to insert after, `template` the
+ * one to copy, which must not be the current page or Mortgage would look
+ * selected too.
+ */
+function findSidebarLinks(): { anchor: HTMLAnchorElement; template: HTMLAnchorElement } | null {
   const links: HTMLAnchorElement[] = [];
   for (const route of ANCHOR_ROUTES) {
     document.querySelectorAll<HTMLAnchorElement>(`a[href="${route}"]`).forEach((a) => {
       // The sidebar sits on the left; skip links elsewhere (e.g. in page content).
       if (!a.closest(`[${ITEM_ATTR}]`) && visible(a) && a.getBoundingClientRect().left < window.innerWidth / 3) links.push(a);
     });
-    if (links.length) break;
   }
-  return links.find((a) => a.getAttribute('aria-current') !== 'page') ?? links[0] ?? null;
+  const anchor = links[0];
+  if (!anchor) return null;
+  return { anchor, template: links.find((a) => a.getAttribute('aria-current') !== 'page') ?? anchor };
 }
 
 /** The tall, narrow ancestor of a sidebar link: the sidebar itself. */
@@ -121,17 +126,57 @@ function start() {
     Object.assign(host.style, { left: `${left}px`, top: `${top}px`, right: '0px', bottom: '0px' });
   };
 
+  // While the mortgage screen is open, the sidebar should show Mortgage as the
+  // current page, not the page underneath. Actual styles its current link
+  // with one class, so swap classes with that link and swap back on close.
+  let itemClass = '';
+  let demoted: { link: HTMLAnchorElement; className: string } | null = null;
+
+  const restoreDemoted = () => {
+    if (!demoted) return;
+    // After Back/Forward the page may have changed under us; then Actual has
+    // moved on and the link should stay unselected.
+    if (demoted.link.pathname === location.pathname) {
+      demoted.link.className = demoted.className;
+      demoted.link.setAttribute('aria-current', 'page');
+    }
+    demoted = null;
+  };
+
   const markActive = (active: boolean) => {
     if (!item) return;
-    if (active) {
-      item.setAttribute('aria-current', 'page');
-      item.style.background = 'var(--color-sidebarItemBackgroundHover, rgba(255,255,255,0.08))';
-      item.style.boxShadow = 'inset 3px 0 0 var(--color-sidebarItemAccentSelected, #8719e0)';
-    } else {
+    if (!active) {
+      restoreDemoted();
+      item.className = itemClass;
       item.removeAttribute('aria-current');
       item.style.background = '';
       item.style.boxShadow = '';
+      return;
     }
+    item.setAttribute('aria-current', 'page');
+    const sidebar = findSidebar(item);
+    const current = sidebar?.querySelector<HTMLAnchorElement>(`a[aria-current="page"]:not([${ITEM_ATTR}])`);
+    if (current && current !== demoted?.link) {
+      restoreDemoted();
+      demoted = { link: current, className: current.className };
+    }
+    if (demoted) {
+      // Re-applied on every call in case Actual re-rendered the link.
+      demoted.link.className = itemClass;
+      demoted.link.removeAttribute('aria-current');
+      item.className = demoted.className;
+    } else {
+      // No current link to borrow from: approximate Actual's look.
+      item.style.background = 'var(--color-sidebarItemBackgroundHover, rgba(255,255,255,0.08))';
+      item.style.boxShadow = 'inset 3px 0 0 var(--color-sidebarItemAccentSelected, #8719e0)';
+    }
+  };
+
+  // The URL carries #mortgage while the screen is open, as its own history
+  // entry, so Back closes it and reload or a bookmark reopens it.
+  const HASH = '#mortgage';
+  const pushHash = () => {
+    if (location.hash !== HASH) history.pushState(history.state, '', `${location.pathname}${location.search}${HASH}`);
   };
 
   const open = () => {
@@ -146,6 +191,7 @@ function start() {
     }
     // Not the `hidden` attribute: Actual's CSS overrides its display:none.
     host.style.display = 'block';
+    pushHash();
     openPath = location.pathname;
     app?.syncTheme();
     layout();
@@ -158,25 +204,36 @@ function start() {
     }, 800);
   };
 
-  const close = () => {
+  /** `dropHash` when nothing else is changing the URL (Actual's own links do). */
+  const close = ({ dropHash = false } = {}) => {
     window.clearInterval(themeTimer);
     if (host) host.style.display = 'none';
     openPath = null;
     markActive(false);
+    if (dropHash && location.hash === HASH) history.replaceState(history.state, '', `${location.pathname}${location.search}`);
   };
+
+  // Back and Forward across the #mortgage entry.
+  window.addEventListener('popstate', () => {
+    if (location.hash === HASH && openPath === null && item) open();
+    else if (location.hash !== HASH && openPath !== null) close();
+  });
 
   const ensureItem = () => {
     if (item?.isConnected) return;
-    const template = findTemplateLink();
-    if (!template) return; // not logged in yet, a modal is up, or mobile layout
-    item = buildItem(template);
+    const found = findSidebarLinks();
+    if (!found) return; // not logged in yet, a modal is up, or mobile layout
+    item = buildItem(found.template);
+    itemClass = item.className;
     item.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (openPath === null) open();
     });
-    template.insertAdjacentElement('afterend', item);
+    found.anchor.insertAdjacentElement('afterend', item);
     if (openPath !== null) markActive(true);
+    // Reloaded or bookmarked with the screen open.
+    else if (location.hash === HASH) open();
   };
 
   // Following any of Actual's links (sidebar, top bar) leaves the mortgage
@@ -199,7 +256,10 @@ function start() {
       queued = false;
       try {
         ensureItem();
-        if (openPath !== null) layout();
+        if (openPath !== null) {
+          layout();
+          markActive(true);
+        }
       } catch (err) {
         observer.disconnect();
         warnOnce('Stopped after an unexpected error', err);
@@ -210,7 +270,7 @@ function start() {
   window.addEventListener('resize', () => openPath !== null && layout());
   ensureItem();
 
-  window.__actualMortgageTab = { open, close };
+  window.__actualMortgageTab = { open, close: () => close({ dropHash: true }) };
 
   // Tell the user once if the sidebar never shows up after login.
   window.setTimeout(() => {

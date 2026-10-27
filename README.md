@@ -149,6 +149,13 @@ or put your own certificate in `certs/` as `tls.crt` + `tls.key` (or set
    tracker's can't interfere with each other. Colors come from Actual's
    theme, so light and dark mode both work. Clicking any other sidebar item
    takes you back.
+
+   Actual doesn't know about a Mortgage page, so the screens cover whatever
+   page you were on. To behave like a real page anyway, the address gets
+   `#mortgage` added (for example `/schedules#mortgage`): the browser's Back
+   button closes Mortgage, Forward reopens it, and a reload or bookmark opens
+   it again. While it's open, the sidebar highlights Mortgage instead of the
+   page underneath.
 4. **It fails quietly.** If Actual's markup changes so much that no sidebar
    link can be found, the script adds nothing and logs one line to the
    browser console:
