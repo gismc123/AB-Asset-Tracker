@@ -28,6 +28,15 @@ function isDark(): boolean {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128;
 }
 
+/** Actual's privacy font, registered by its page (fonts cross into the shadow root). */
+function hasRedactedFont(): boolean {
+  try {
+    return [...document.fonts].some((f) => f.family.replace(/["']/g, '') === 'Redacted Script');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Render the Mortgage screens into `host` inside a shadow root, so its
  * styles never touch Actual's and the other way round.
@@ -56,7 +65,10 @@ export function mountMortgageApp(host: HTMLElement, client: MortgageClient = cre
   syncTheme();
   return {
     syncTheme,
-    setPrivacy: (on) => container.classList.toggle('privacy', on),
+    setPrivacy(on) {
+      container.classList.toggle('privacy', on);
+      container.classList.toggle('redact', on && hasRedactedFont());
+    },
     unmount() {
       for (const type of KEY_EVENTS) shadow.removeEventListener(type, keepKeysInside);
       root.unmount();

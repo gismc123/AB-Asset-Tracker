@@ -82,7 +82,9 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
                     <td className="l">{date(r.dueDate)}</td>
                     {r.skipped ? (
                       <td colSpan={6} className="muted" style={{ textAlign: 'center' }}>
-                        {r.skipped === 'capitalize' ? (
+                        {r.skipped === 'catchUp' ? (
+                          <>Missed · <Amt cents={r.pastDue} /> past due, caught up later</>
+                        ) : r.skipped === 'capitalize' ? (
                           <>Skipped · <Amt cents={r.capitalizedInterest} /> interest added to the balance</>
                         ) : (
                           <>Skipped · <Amt cents={r.deferred} /> deferred to payoff</>
@@ -95,9 +97,16 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
                         <td className={r.extraPrincipal ? '' : 'muted'}>{r.extraPrincipal ? <Amt cents={r.extraPrincipal} /> : '—'}</td>
                         <td className={r.pmi ? '' : 'muted'}>{r.pmi ? <Amt cents={r.pmi} /> : '—'}</td>
                         <td><Amt cents={r.escrow} /></td>
-                        <td style={{ fontWeight: 600 }} title={r.deferredRepaid ? 'Includes the deferred balance, due at payoff' : undefined}>
+                        <td
+                          style={{ fontWeight: 600 }}
+                          title={
+                            [r.deferredRepaid ? 'Includes the deferred balance, due at payoff' : '', r.catchUp ? 'Includes catching up missed payments' : '']
+                              .filter(Boolean)
+                              .join('. ') || undefined
+                          }
+                        >
                           <Amt cents={r.total} />
-                          {r.deferredRepaid > 0 && ' *'}
+                          {(r.deferredRepaid > 0 || r.catchUp) && ' *'}
                         </td>
                       </>
                     )}

@@ -123,6 +123,12 @@ export function createApp(deps: AppDeps) {
   api.post('/months/:payment/unskip', (req, res) => {
     res.json(service.unskip(paymentParam(req)));
   });
+  api.put('/months/:payment/catch-up', (req, res) => {
+    res.json(service.setCatchUpPlan(paymentParam(req), req.body));
+  });
+  api.delete('/months/:payment/catch-up', (req, res) => {
+    res.json(service.clearCatchUpPlan(paymentParam(req)));
+  });
   api.post('/home-values', (req, res) => {
     res.json(service.addHomeValue(req.body));
   });
@@ -182,6 +188,7 @@ export function summaryForDisplay(s: LoanSummary) {
       : null,
     balance: dollars(s.balance),
     deferredBalance: dollars(s.deferredBalance),
+    pastDue: dollars(s.pastDue),
     scheduledBalance: dollars(s.scheduledBalance),
     percentPaid: s.percentPaid,
     equity: dollars(s.equity),

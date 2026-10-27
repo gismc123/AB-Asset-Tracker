@@ -88,7 +88,8 @@ function mockClient(empty: boolean): MortgageClient {
 
   const state = (): StateView => {
     const base = {
-      setup, settings: { categoryId }, source: { connected: true, lastSync: null, error: null }, today: TODAY, adjustments: [],
+      setup, settings: { categoryId }, source: { connected: true, lastSync: null, error: null }, today: TODAY,
+      adjustments: adjustments.map((a, i) => ({ id: i + 1, adjustment: a.adj, sourcePayment: a.source, createdAt: '' })),
       homeValues: [...homeValues].sort((a, b) => a.date.localeCompare(b.date)), details,
     };
     if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
@@ -168,6 +169,21 @@ function mockClient(empty: boolean): MortgageClient {
     },
     async unskip(n) {
       for (let i = adjustments.length - 1; i >= 0; i--) { const a = adjustments[i]!.adj; if (a.kind === 'skip' && a.payment === n) adjustments.splice(i, 1); }
+      return later(state());
+    },
+    async setCatchUpPlan(n, fromPayment, months) {
+      const rows = build().rows;
+      if (rows[n - 1]?.skipped !== 'catchUp') throw new ApiError(409, `Payment ${n} isn't a missed payment to catch up`);
+      const covering = adjustments.filter((a) => a.adj.kind === 'catchUpPlan' && a.adj.fromPayment > n)
+        .sort((a, b) => (a.adj as { fromPayment: number }).fromPayment - (b.adj as { fromPayment: number }).fromPayment)[0];
+      if (covering) adjustments.splice(adjustments.indexOf(covering), 1);
+      adjustments.push({ adj: { kind: 'catchUpPlan', fromPayment, months }, source: null });
+      return later(state());
+    },
+    async clearCatchUpPlan(n) {
+      const covering = adjustments.filter((a) => a.adj.kind === 'catchUpPlan' && a.adj.fromPayment > n)
+        .sort((a, b) => (a.adj as { fromPayment: number }).fromPayment - (b.adj as { fromPayment: number }).fromPayment)[0];
+      if (covering) adjustments.splice(adjustments.indexOf(covering), 1);
       return later(state());
     },
     async addHomeValue(v) { homeValues.push({ id: nextId++, ...v }); return later(state()); },

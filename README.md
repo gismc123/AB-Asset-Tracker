@@ -47,7 +47,8 @@ The Mortgage tab sits in Actual's sidebar, under the regular items. It has seven
 
 It follows Actual's light/dark theme and **privacy mode**: with privacy mode on
 (the eye icon in Actual's top bar), every dollar amount on the Mortgage screens
-is blurred until you hover over it, like Actual's own numbers.
+turns into a squiggle until you hover over it, using Actual's own privacy
+font, exactly like Actual's numbers.
 
 Under the hood:
 
@@ -260,19 +261,33 @@ screen shows every month's status; click any row to reconcile it.
 
 ### Skipping a payment
 
-If your servicer approves skipping a payment (a skip-a-payment offer,
-forbearance, or a deferral), open that month in **Reconcile**, expand
-**Skipping this payment?**, and pick how your servicer handles it:
+If your servicer approves skipping a payment (a hardship grace period, a
+skip-a-payment offer, forbearance, or a deferral), open that month in
+**Reconcile**, expand **Skipping this payment?**, and pick how your servicer
+handles it:
 
 | Choice | What the schedule does |
 |---|---|
+| **Missed now, caught up later** | A grace period, e.g. after a job loss: you may miss payments for a while (often up to 60 days) and pay them back later. Nothing is forgiven. The whole missed payment, including PMI and escrow, becomes *past due*. No interest is added and the loan's length doesn't change. |
 | **Interest is added to the balance** | Nothing is paid that month. The month's interest is added to what you owe, the same monthly payment continues, and the loan runs a little longer. Typical of skip-a-payment offers. |
 | **Payment is deferred to payoff** | Nothing is paid that month. The missed principal and interest go into a separate, interest-free balance that's due in one lump sum when the loan is paid off (or the home is sold). Typical after forbearance. |
 
-Either way, no PMI or escrow is collected for a skipped month. A skipped month
-has no bank transaction, so it counts as done once its due date passes. Equity
-counts any deferred amount as still owed. **Undo skip** removes it. Servicers
-differ, so check the terms in your approval letter.
+**Catching up.** For a *missed now, caught up later* month, set a **catch-up
+plan** on the same screen: *starting with* a later payment, *spread over* a
+number of payments (1 pays it all at once). Consecutive missed months share
+one plan. Those months then expect the larger amount when you reconcile them,
+the catch-up is split back into principal, interest, PMI and escrow (so the
+escrow ledger and the yearly totals stay right), and the Overview shows
+what's still past due. Until you set a plan, the schedule holds the past-due
+amount until the final payment. You can change or remove the plan any time.
+Ask your servicer how long the grace period lasts, and get it in writing that
+there are no late fees or credit reporting.
+
+With the other two choices, no PMI or escrow is collected for the skipped
+month. A skipped month has no bank transaction, so it counts as done once its
+due date passes. Equity counts deferred and past-due amounts as still owed.
+**Undo skip** removes a skip (and a catch-up plan with nothing left to repay).
+Servicers differ, so check the terms in your approval letter.
 
 ## 5a. Equity, escrow and loan details
 
@@ -453,6 +468,7 @@ Example response (made-up numbers):
   "nextPayment": { "number": 5, "dueDate": "2025-08-01", "amount": 2583.12, "daysUntil": 12 },
   "balance": 318833.42,
   "deferredBalance": 0,
+  "pastDue": 0,
   "scheduledBalance": 318833.42,
   "percentPaid": 0.36,
   "equity": 36166.58,
@@ -477,7 +493,7 @@ Example response (made-up numbers):
 - `paymentNumber` is the last *reconciled* payment. `balance` is after that
   payment; `scheduledBalance` is what the schedule expects by today.
 - `equity` is original home value minus what's owed (balance plus any
-  deferred payments). `homeValue`, `marketEquity` and `marketEquityPercent`
+  deferred or past-due payments). `homeValue`, `marketEquity` and `marketEquityPercent`
   use your latest home value estimate and are `null` until you add one.
 - Loan details (servicer, account numbers, notes) are never included.
 - The endpoint never changes anything, and its token can't be used for the
@@ -543,8 +559,10 @@ All under `/mortgage-api`, and all except `health` and `v1/summary` need the
 | `POST /months/:n/resolve` | `{ resolution: rounding\|escrow\|pmi\|extraPrincipal, standing? }` |
 | `POST /months/:n/unmatch` | Undo a match and the adjustments it created |
 | `PUT /months/:n/offset` | `{ amount }`, manual penny offset in cents (±100) |
-| `POST /months/:n/skip` | `{ mode: capitalize\|defer }`, mark payment *n* as skipped |
+| `POST /months/:n/skip` | `{ mode: catchUp\|capitalize\|defer }`, mark payment *n* as skipped |
 | `POST /months/:n/unskip` | Undo a skip |
+| `PUT /months/:n/catch-up` | `{ fromPayment, months }`, plan to pay back missed payment *n* |
+| `DELETE /months/:n/catch-up` | Remove that plan |
 | `POST /home-values` | `{ date, value, source }`, add a home value estimate (cents) |
 | `DELETE /home-values/:id` | Remove an estimate |
 | `POST /escrow/entries` | `{ date, kind, amount, note }`, record an escrow bill or deposit (cents) |

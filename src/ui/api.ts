@@ -72,6 +72,8 @@ export interface MortgageClient {
   setOffset(payment: number, amount: number): Promise<StateView>;
   skip(payment: number, mode: SkipMode): Promise<StateView>;
   unskip(payment: number): Promise<StateView>;
+  setCatchUpPlan(payment: number, fromPayment: number, months: number): Promise<StateView>;
+  clearCatchUpPlan(payment: number): Promise<StateView>;
   addHomeValue(value: { date: ISODate; value: Cents; source: string }): Promise<StateView>;
   deleteHomeValue(id: number): Promise<StateView>;
   addEscrowEntry(entry: { date: ISODate; kind: EscrowKind; amount: Cents; note: string }): Promise<StateView>;
@@ -111,6 +113,8 @@ export function createClient(base = '/mortgage-api', getToken: () => Promise<str
     setOffset: (n, amount) => call('PUT', `/months/${n}/offset`, { amount }),
     skip: (n, mode) => call('POST', `/months/${n}/skip`, { mode }),
     unskip: (n) => call('POST', `/months/${n}/unskip`),
+    setCatchUpPlan: (n, fromPayment, months) => call('PUT', `/months/${n}/catch-up`, { fromPayment, months }),
+    clearCatchUpPlan: (n) => call('DELETE', `/months/${n}/catch-up`),
     addHomeValue: (v) => call('POST', '/home-values', v),
     deleteHomeValue: (id) => call('DELETE', `/home-values/${id}`),
     addEscrowEntry: (e) => call('POST', '/escrow/entries', e),

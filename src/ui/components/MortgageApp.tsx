@@ -140,6 +140,14 @@ export function MortgageApp({ client }: { client: MortgageClient }) {
 
       {tab === 'overview' && s && state.summary && state.setup && (
         <>
+          {state.summary.pastDue > 0 && (
+            <div className="mt-note warn" style={{ marginBottom: 14 }}>
+              <Amt cents={state.summary.pastDue} /> past due from missed payments.{' '}
+              {state.adjustments.some((a) => a.adjustment.kind === 'catchUpPlan')
+                ? 'A catch-up plan is in the schedule.'
+                : 'Set up a catch-up plan from the missed month in Reconcile.'}
+            </div>
+          )}
           <SummaryCards summary={state.summary} />
           <div className="mt-gap" />
           <div className="mt-grid mt-two">
@@ -190,6 +198,7 @@ export function MortgageApp({ client }: { client: MortgageClient }) {
         <ReconcileView
           client={client}
           rows={s.rows}
+          adjustments={state.adjustments}
           payment={Math.min(payment, s.rows.length)}
           onPaymentChange={setPayment}
           categoryId={state.settings.categoryId}

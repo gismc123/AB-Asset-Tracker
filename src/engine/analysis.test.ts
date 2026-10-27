@@ -71,6 +71,64 @@ describe('skipping a payment', () => {
     expect(sum.paymentsMade).toBe(2);
   });
 
+  it('catchUp: the whole payment becomes past due; the loan and its lifetime totals are unchanged', () => {
+    const s = generateSchedule(setup, { adjustments: [{ kind: 'skip', payment: 3, mode: 'catchUp' }] });
+    const r = s.rows[2]!;
+    expect(r).toMatchObject({ skipped: 'catchUp', total: 0, deferred: 0 });
+    expect(r.pastDue).toBe(plain.rows[2]!.total); // P&I + PMI + escrow
+    expect(r.endingBalance).toBe(plain.rows[2]!.endingBalance);
+    expect(s.rows).toHaveLength(plain.rows.length);
+    // No plan yet: it all comes due with the final payment.
+    expect(s.rows.at(-1)!.catchUp!.total).toBe(r.pastDue);
+    for (const k of ['interest', 'principal', 'pmi', 'escrow'] as const) expect(s.totals[k]).toBe(plain.totals[k]);
+  });
+
+  it('catchUp plan: spreads two missed payments over later months, to the cent', () => {
+    const s = generateSchedule(setup, {
+      adjustments: [
+        { kind: 'skip', payment: 3, mode: 'catchUp' },
+        { kind: 'skip', payment: 4, mode: 'catchUp' },
+        { kind: 'catchUpPlan', fromPayment: 6, months: 3 },
+      ],
+    });
+    const owed = s.rows[2]!.pastDue + s.rows[3]!.pastDue;
+    const shares = [5, 6, 7].map((i) => s.rows[i]!.catchUp?.total ?? 0);
+    expect(s.rows[4]!.catchUp).toBeNull(); // payment 5: before the plan
+    expect(shares.reduce((a, b) => a + b, 0)).toBe(owed);
+    expect(Math.max(...shares) - Math.min(...shares)).toBeLessThanOrEqual(4);
+    expect(s.rows[5]!.total).toBe(plain.rows[5]!.total + shares[0]!);
+    expect(s.rows.at(-1)!.catchUp).toBeNull();
+    for (const k of ['interest', 'principal', 'pmi', 'escrow'] as const) expect(s.totals[k]).toBe(plain.totals[k]);
+  });
+
+  it('catchUp: past due counts as owed until it is paid back', () => {
+    const s = generateSchedule(setup, {
+      adjustments: [{ kind: 'skip', payment: 2, mode: 'catchUp' }, { kind: 'catchUpPlan', fromPayment: 4, months: 1 }],
+    });
+    const missed = s.rows[1]!.pastDue;
+    const mid = summarize(setup, s, new Set([1, 3]), '2025-06-15');
+    expect(mid.pastDue).toBe(missed);
+    expect(mid.equity).toBe(setup.originalHomeValue - mid.balance - missed);
+    const caughtUp = summarize(setup, s, new Set([1, 3, 4]), '2025-07-15');
+    expect(caughtUp.pastDue).toBe(0);
+    const e = analyzeEquity(setup, s, new Set([1, 3, 4]), '2025-07-15');
+    expect(e.pastDue).toBe(0);
+    const p = e.parts;
+    expect(p.startingEquity + p.principalPaid + p.extraPrincipal + p.skipped + p.marketChange).toBe(e.equity);
+    expect(p.skipped).toBe(0); // fully caught up: no lasting cost
+  });
+
+  it('catchUp: the escrow part goes into escrow when it is paid back', () => {
+    const s = generateSchedule(setup, {
+      adjustments: [{ kind: 'skip', payment: 2, mode: 'catchUp' }, { kind: 'catchUpPlan', fromPayment: 3, months: 1 }],
+    });
+    const rep = escrowReport(s.rows, new Map([[1, '2025-04-01'], [3, '2025-06-01']]), [], '2025-06-15');
+    expect(rep.balance).toBe(3 * 40_000);
+    const b = periodBreakouts(s.rows, new Map([[1, '2025-04-01'], [3, '2025-06-01']]), '2025-06-15', 'paid');
+    expect(b.month.totals.catchUp).toBe(s.rows[1]!.pastDue);
+    expect(b.month.totals.escrow).toBe(2 * 40_000);
+  });
+
   it('a skipped month cannot be locked as paid', () => {
     const s = generateSchedule(setup, { adjustments: [{ kind: 'skip', payment: 1, mode: 'capitalize' }] });
     expect(() => lockRow(s.rows[0]!)).toThrow(/skipped/);

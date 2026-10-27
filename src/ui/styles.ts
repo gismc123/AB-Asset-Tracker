@@ -219,9 +219,18 @@ textarea.mt-input { min-height: 90px; resize: vertical; font: inherit; }
 .mt-kv dd { margin: 0; text-align: right; font-weight: 600; }
 .mt-empty { text-align: center; color: var(--muted); padding: 28px 12px; }
 .mt-diff { font-size: 22px; font-weight: 700; }
-/* Actual's privacy mode: blur amounts, reveal on hover like Actual does. */
-.mt.privacy .mt-amt, .mt.privacy .mt-chart .axis.amount, .mt.privacy .mt-tip b,
-.mt.privacy .mt-secret, .mt.privacy .mt-prefix > .mt-input:not(:focus) { filter: blur(5px); transition: filter 0.1s; }
-.mt.privacy .mt-amt:hover, .mt.privacy .mt-secret:hover { filter: none; }
+/*
+ * Actual's privacy mode. Like Actual, draw amounts in its "Redacted Script"
+ * font (squiggles) and show the real digits on hover or focus. The font is
+ * Actual's own, loaded by its page; if it's ever missing, blur instead.
+ */
+.mt.privacy.redact .mt-amt:not(:hover), .mt.privacy.redact .mt-chart .axis.amount, .mt.privacy.redact .mt-tip b,
+.mt.privacy.redact .mt-secret:not(:focus):not(:hover), .mt.privacy.redact .mt-prefix > .mt-input:not(:focus):not(:hover) {
+  font-family: 'Redacted Script', var(--font-family, sans-serif);
+}
+.mt.privacy:not(.redact) .mt-amt:not(:hover), .mt.privacy:not(.redact) .mt-chart .axis.amount, .mt.privacy:not(.redact) .mt-tip b,
+.mt.privacy:not(.redact) .mt-secret:not(:focus):not(:hover), .mt.privacy:not(.redact) .mt-prefix > .mt-input:not(:focus):not(:hover) {
+  filter: blur(5px);
+}
 .mt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 `;

@@ -91,8 +91,10 @@ export function escrowReport(
   const raw: Omit<EscrowLine, 'balance'>[] = [];
   for (const r of rows) {
     const when = paidOn.get(r.payment);
-    if (!when || r.skipped || r.escrow <= 0) continue;
-    raw.push({ date: when, kind: 'payment', label: `Payment #${r.payment}`, note: '', amount: r.escrow, payment: r.payment, entryId: null });
+    const escrow = (r.skipped ? 0 : r.escrow) + (r.catchUp?.escrow ?? 0);
+    if (!when || escrow <= 0) continue;
+    const note = r.catchUp?.escrow ? 'includes catch-up' : '';
+    raw.push({ date: when, kind: 'payment', label: `Payment #${r.payment}`, note, amount: escrow, payment: r.payment, entryId: null });
   }
   for (const e of entries) {
     const info = kindInfo(e.kind);

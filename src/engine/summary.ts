@@ -18,10 +18,12 @@ export interface LoanSummary {
   balance: Cents;
   /** Skipped payments deferred to payoff and not yet repaid. Also owed on the home. */
   deferredBalance: Cents;
+  /** Missed payments (catch-up skips) not yet paid back. */
+  pastDue: Cents;
   /** Balance the schedule expects after every payment due on or before today. */
   scheduledBalance: Cents;
   percentPaid: number;
-  /** Original home value minus what's owed (balance + deferred). */
+  /** Original home value minus what's owed (balance + deferred + past due). */
   equity: Cents;
   equityPercent: number;
   /** Latest home value estimate, if any, and equity measured against it. */
@@ -74,7 +76,8 @@ export function summarize(
   const lastSettled = settled.at(-1) ?? null;
   const balance = lastSettled ? lastSettled.endingBalance : setup.originalAmount;
   const deferredBalance = settled.reduce((sum, r) => sum + r.deferred - r.deferredRepaid, 0);
-  const owed = balance + deferredBalance;
+  const pastDue = settled.reduce((sum, r) => sum + r.pastDue - (r.catchUp?.total ?? 0), 0);
+  const owed = balance + deferredBalance + pastDue;
   const dueByToday = rows.filter((r) => r.dueDate <= today).at(-1);
   const scheduledBalance = dueByToday ? dueByToday.endingBalance : setup.originalAmount;
   const next = rows.find((r) => !paid.has(r.payment) && r.skipped === null) ?? null;
@@ -90,6 +93,7 @@ export function summarize(
     totalPayments: rows.length,
     balance,
     deferredBalance,
+    pastDue,
     scheduledBalance,
     percentPaid: pct(setup.originalAmount - balance, setup.originalAmount),
     equity: setup.originalHomeValue - owed,

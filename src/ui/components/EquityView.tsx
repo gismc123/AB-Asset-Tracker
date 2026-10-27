@@ -37,9 +37,11 @@ export function EquityView({ state, client, onState }: Props) {
             <Amt cents={e.owed} />
           </div>
           <div className="mt-kpi-note">
-            {e.deferredBalance > 0 ? (
+            {e.pastDue > 0 || e.deferredBalance > 0 ? (
               <>
-                Includes <Amt cents={e.deferredBalance} /> deferred
+                Includes {e.pastDue > 0 && <><Amt cents={e.pastDue} /> past due</>}
+                {e.pastDue > 0 && e.deferredBalance > 0 && ' and '}
+                {e.deferredBalance > 0 && <><Amt cents={e.deferredBalance} /> deferred</>}
               </>
             ) : (
               'Loan balance'
@@ -131,7 +133,7 @@ function EquityParts({ state }: { state: StateView }) {
     { label: 'Principal paid', note: 'From regular payments', value: e.parts.principalPaid },
     { label: 'Extra principal', note: 'Paid on top of the schedule', value: e.parts.extraPrincipal },
     { label: 'Home value change', note: e.isEstimate ? `Since purchase, per ${e.homeValueSource.toLowerCase()}` : 'Add an estimate to include it', value: e.parts.marketChange },
-    { label: 'Skipped payments', note: 'Interest added or payments deferred', value: e.parts.skipped },
+    { label: 'Skipped payments', note: 'Interest added, or payments deferred or not yet caught up', value: e.parts.skipped },
   ].filter((p, i) => i < 2 || p.value !== 0 || (i === 3 && !e.isEstimate));
   const max = Math.max(1, ...parts.map((p) => Math.abs(p.value)));
 
@@ -338,6 +340,16 @@ function Breakouts({ periods, hasPaid }: { periods: Record<PeriodBasis, PeriodBr
                 </td>
               ))}
             </tr>
+            {cols.some((c) => c.t.catchUp > 0) && (
+              <tr>
+                <td className="muted">Of which, catching up</td>
+                {cols.map((c) => (
+                  <td key={c.id} className="muted">
+                    {c.t.catchUp ? <Amt cents={c.t.catchUp} /> : '—'}
+                  </td>
+                ))}
+              </tr>
+            )}
             <tr>
               <td className="muted">Payments</td>
               {cols.map((c) => (

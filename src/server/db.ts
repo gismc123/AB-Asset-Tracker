@@ -124,7 +124,8 @@ CREATE TABLE IF NOT EXISTS escrow_entries (
 const SINGLE_PAYMENT_KINDS: AdjustmentKind[] = ['pennyOffset', 'extraPrincipal'];
 
 function toAdjustment(kind: AdjustmentKind, payment: number, amount: Cents, mode: string | null): Adjustment {
-  if (kind === 'skip') return { kind, payment, mode: mode === 'defer' ? 'defer' : 'capitalize' };
+  if (kind === 'skip') return { kind, payment, mode: mode === 'defer' || mode === 'catchUp' ? mode : 'capitalize' };
+  if (kind === 'catchUpPlan') return { kind, fromPayment: payment, months: amount };
   return (SINGLE_PAYMENT_KINDS.includes(kind) ? { kind, payment, amount } : { kind, fromPayment: payment, amount }) as Adjustment;
 }
 
@@ -204,12 +205,16 @@ export class Store {
 
   addAdjustment(a: Adjustment, sourcePayment: number | null): number {
     const payment = 'payment' in a ? a.payment : a.fromPayment;
-    const amount = 'amount' in a ? a.amount : 0;
+    const amount = 'amount' in a ? a.amount : a.kind === 'catchUpPlan' ? a.months : 0;
     const mode = a.kind === 'skip' ? a.mode : null;
     const result = this.db
       .prepare(`INSERT INTO adjustments (kind, payment, amount, mode, source_payment, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(a.kind, payment, amount, mode, sourcePayment, new Date().toISOString());
     return Number(result.lastInsertRowid);
+  }
+
+  deleteAdjustment(id: number) {
+    this.db.prepare(`DELETE FROM adjustments WHERE id = ?`).run(id);
   }
 
   setSkip(payment: number, mode: SkipMode | null) {

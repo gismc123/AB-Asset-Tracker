@@ -17,7 +17,26 @@ export function PaymentBreakdown({ row, title }: { row: ScheduleRow; title?: str
         <dl className="mt-kv">
           <dt>Paid this month</dt>
           <dd><Amt cents={0} /></dd>
-          {row.skipped === 'capitalize' ? (
+          {row.skipped === 'catchUp' ? (
+            <>
+              <dt>Principal &amp; interest</dt>
+              <dd><Amt cents={row.principalAndInterest} /></dd>
+              {row.pmi > 0 && (
+                <>
+                  <dt>PMI</dt>
+                  <dd><Amt cents={row.pmi} /></dd>
+                </>
+              )}
+              {row.escrow > 0 && (
+                <>
+                  <dt>Escrow</dt>
+                  <dd><Amt cents={row.escrow} /></dd>
+                </>
+              )}
+              <dt>Past due, to catch up</dt>
+              <dd><Amt cents={row.pastDue} /></dd>
+            </>
+          ) : row.skipped === 'capitalize' ? (
             <>
               <dt>Interest added to the balance</dt>
               <dd><Amt cents={row.capitalizedInterest} /></dd>
@@ -59,6 +78,13 @@ export function PaymentBreakdown({ row, title }: { row: ScheduleRow; title?: str
             <span className="v"><Amt cents={p.value} /></span>
           </div>
         ))}
+        {row.catchUp && (
+          <div className="mt-legend-row">
+            <span className="mt-swatch" style={{ background: 'var(--muted)' }} />
+            Catching up missed payments
+            <span className="v"><Amt cents={row.catchUp.total} /></span>
+          </div>
+        )}
         {row.deferredRepaid > 0 && (
           <div className="mt-legend-row">
             <span className="mt-swatch" style={{ background: 'var(--muted)' }} />

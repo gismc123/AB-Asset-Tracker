@@ -26,6 +26,8 @@ export interface EquityAnalysis {
   isEstimate: boolean;
   balance: Cents;
   deferredBalance: Cents;
+  /** Missed payments not yet caught up. */
+  pastDue: Cents;
   owed: Cents;
   equity: Cents;
   equityPercent: number;
@@ -38,7 +40,7 @@ export interface EquityAnalysis {
     /** Regular principal paid so far. */
     principalPaid: Cents;
     extraPrincipal: Cents;
-    /** Skipped payments: interest added to the balance or payments deferred (zero or negative). */
+    /** Skipped payments: interest added, or payments deferred or past due (zero or negative). */
     skipped: Cents;
     /** Home value change since purchase (zero without an estimate). */
     marketChange: Cents;
@@ -70,11 +72,15 @@ export function analyzeEquity(
   const settledSet = new Set(settled.map((r) => r.payment));
 
   let deferred = 0;
+  let pastDue = 0;
   let settledIndex = -1;
+  const owedExtra: { deferred: number; pastDue: number }[] = [];
   const projection: EquityPoint[] = schedule.rows.map((r, i) => {
     deferred += r.deferred - r.deferredRepaid;
+    pastDue += r.pastDue - (r.catchUp?.total ?? 0);
+    owedExtra.push({ deferred, pastDue });
     if (settledSet.has(r.payment)) settledIndex = i;
-    const owed = r.endingBalance + deferred;
+    const owed = r.endingBalance + deferred + pastDue;
     return { payment: r.payment, dueDate: r.dueDate, owed, equity: homeValue - owed };
   });
 
@@ -86,6 +92,7 @@ export function analyzeEquity(
   let principalPaid = 0;
   let extraPrincipal = 0;
   for (const r of settled) {
+    principalPaid += r.catchUp?.principal ?? 0;
     if (r.skipped) continue;
     principalPaid += r.scheduledPrincipal + r.pennyOffset;
     extraPrincipal += r.extraPrincipal;
@@ -109,7 +116,8 @@ export function analyzeEquity(
     homeValueSource: estimate?.source ?? 'Original home value',
     isEstimate: estimate !== null,
     balance,
-    deferredBalance: owed - balance,
+    deferredBalance: settledIndex >= 0 ? owedExtra[settledIndex]!.deferred : 0,
+    pastDue: settledIndex >= 0 ? owedExtra[settledIndex]!.pastDue : 0,
     owed,
     equity,
     equityPercent,

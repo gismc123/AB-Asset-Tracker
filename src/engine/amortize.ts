@@ -9,6 +9,7 @@ import type {
   PmiMilestone,
   Schedule,
   ScheduleRow,
+  PaymentParts,
   SkipMode,
 } from './types.js';
 
@@ -84,7 +85,77 @@ function skipAt(adjustments: readonly Adjustment[], k: number): SkipMode | null 
 }
 
 /** Fields a row has when nothing was skipped. */
-const NOT_SKIPPED = { skipped: null, capitalizedInterest: 0, deferred: 0, deferredRepaid: 0 } as const;
+const NOT_SKIPPED = { skipped: null, capitalizedInterest: 0, deferred: 0, deferredRepaid: 0, pastDue: 0, catchUp: null } as const;
+
+const noParts = (): PaymentParts => ({ principal: 0, interest: 0, pmi: 0, escrow: 0, total: 0 });
+function addParts(a: PaymentParts, b: PaymentParts) {
+  a.principal += b.principal;
+  a.interest += b.interest;
+  a.pmi += b.pmi;
+  a.escrow += b.escrow;
+  a.total += b.total;
+}
+
+/** Split `pool` into `n` installments: even shares, any remainder on the last. */
+function splitParts(pool: PaymentParts, n: number): PaymentParts[] {
+  const keys = ['principal', 'interest', 'pmi', 'escrow'] as const;
+  return Array.from({ length: n }, (_, i) => {
+    const part = noParts();
+    for (const k of keys) {
+      const share = Math.floor(pool[k] / n);
+      part[k] = i === n - 1 ? pool[k] - share * (n - 1) : share;
+    }
+    part.total = part.principal + part.interest + part.pmi + part.escrow;
+    return part;
+  });
+}
+
+/**
+ * Place catch-up payments. Each `catchUp` skip adds its missed payment to a
+ * past-due pool; a plan spreads the pool present at its start over its
+ * months. A planned month that is itself skipped goes back into the pool.
+ * Whatever is never planned is due with the final payment.
+ */
+function applyCatchUp(rows: ScheduleRow[], adjustments: readonly Adjustment[]) {
+  const plans = new Map<number, number>();
+  for (const a of adjustments) if (a.kind === 'catchUpPlan') plans.set(a.fromPayment, a.months);
+  let pool = noParts();
+  const due = new Map<number, PaymentParts>();
+
+  for (const row of rows) {
+    const months = plans.get(row.payment);
+    if (months && pool.total > 0) {
+      splitParts(pool, months).forEach((part, i) => {
+        const existing = due.get(row.payment + i);
+        if (existing) addParts(existing, part);
+        else due.set(row.payment + i, part);
+      });
+      pool = noParts();
+    }
+    const share = due.get(row.payment);
+    due.delete(row.payment);
+    if (row.skipped === 'catchUp') {
+      const missed = { principal: row.scheduledPrincipal, interest: row.interest, pmi: row.pmi, escrow: row.escrow, total: row.pastDue };
+      addParts(pool, missed);
+    }
+    if (!share) continue;
+    // A locked row already carries what was actually paid back.
+    if (row.skipped || row.locked) {
+      if (row.skipped) addParts(pool, share);
+      continue;
+    }
+    row.catchUp = share;
+    row.total += share.total;
+  }
+
+  for (const rest of due.values()) addParts(pool, rest);
+  const last = rows.at(-1);
+  if (last && pool.total > 0 && !last.skipped && !last.locked) {
+    if (last.catchUp) addParts(last.catchUp, pool);
+    else last.catchUp = pool;
+    last.total += pool.total;
+  }
+}
 
 export function standingExtraAt(setup: LoanSetup, adjustments: readonly Adjustment[], k: number): Cents {
   return valueFrom(adjustments, 'standingExtra', k, setup.extraPrincipal).amount;
@@ -151,21 +222,28 @@ function amortize(
     // skipped payment the loan genuinely runs longer.
     if (k >= termMonths && balance - scheduledPrincipal <= Math.max(100, Math.round(pi * 0.02))) scheduledPrincipal = balance;
 
-    if (skip === 'defer') {
-      const deferred = scheduledPrincipal + interest;
+    if (skip === 'defer' || skip === 'catchUp') {
+      // The balance moves as if this installment were paid; what's missed is
+      // tracked separately (deferred to payoff, or past due until caught up).
+      const missedPi = scheduledPrincipal + interest;
+      const catchUp = skip === 'catchUp';
+      const escrow = catchUp ? valueFrom(adjustments, 'escrow', k, setup.escrowMonthly).amount : 0;
       rows.push({
         ...empty,
         ...NOT_SKIPPED,
         interest,
         scheduledPrincipal,
         principal: scheduledPrincipal,
-        principalAndInterest: deferred,
+        principalAndInterest: missedPi,
+        escrow,
         endingBalance: balance - scheduledPrincipal,
-        skipped: 'defer',
-        deferred,
+        skipped: skip,
+        deferred: catchUp ? 0 : missedPi,
+        // PMI is added to this once it's known, below.
+        pastDue: catchUp ? missedPi + escrow : 0,
       });
       balance -= scheduledPrincipal;
-      deferredBalance += deferred;
+      if (!catchUp) deferredBalance += missedPi;
       continue;
     }
 
@@ -249,15 +327,19 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
   const pmiStart = setup.pmiStartDate ?? setup.firstPaymentDate;
 
   for (const row of rows) {
-    if (row.locked || row.skipped) continue;
+    // Interest-added and deferred skips collect no PMI. A catch-up skip still
+    // owes it, as part of the past-due amount.
+    if (row.locked || (row.skipped && row.skipped !== 'catchUp')) continue;
     const set = valueFrom(adjustments, 'pmi', row.payment, setup.pmiMonthly);
     // A PMI change recorded on or after the planned drop means the servicer is
     // still charging it, so reality overrides the plan from that payment on.
     const servicerStillCharging = set.fromPayment !== null && set.fromPayment >= plannedDrop;
     const active = row.dueDate >= pmiStart && (row.payment < plannedDrop || servicerStillCharging);
     row.pmi = active ? set.amount : 0;
-    row.total += row.pmi;
+    if (row.skipped) row.pastDue += row.pmi;
+    else row.total += row.pmi;
   }
+  applyCatchUp(rows, adjustments);
 
   let lastPmi = -1;
   rows.forEach((r, i) => {
@@ -281,17 +363,20 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
         : 0,
   };
 
+  // What's actually collected: skipped months pay nothing, catch-up payments
+  // pay the missed parts later.
   const totals = rows.reduce(
     (t, r) => ({
-      interest: t.interest + (r.skipped ? 0 : r.interest),
-      principal: t.principal + (r.skipped ? 0 : r.principal),
-      pmi: t.pmi + r.pmi,
-      escrow: t.escrow + r.escrow,
+      interest: t.interest + (r.skipped ? 0 : r.interest) + (r.catchUp?.interest ?? 0),
+      principal: t.principal + (r.skipped ? 0 : r.principal) + (r.catchUp?.principal ?? 0),
+      pmi: t.pmi + (r.skipped ? 0 : r.pmi) + (r.catchUp?.pmi ?? 0),
+      escrow: t.escrow + (r.skipped ? 0 : r.escrow) + (r.catchUp?.escrow ?? 0),
       payments: t.payments + (r.skipped ? 0 : 1),
       capitalizedInterest: t.capitalizedInterest + r.capitalizedInterest,
       deferred: t.deferred + r.deferred,
+      pastDue: t.pastDue + r.pastDue,
     }),
-    { interest: 0, principal: 0, pmi: 0, escrow: 0, payments: 0, capitalizedInterest: 0, deferred: 0 },
+    { interest: 0, principal: 0, pmi: 0, escrow: 0, payments: 0, capitalizedInterest: 0, deferred: 0, pastDue: 0 },
   );
 
   return { piPayment, calculatedPiPayment, rows, pmi, totals };

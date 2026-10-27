@@ -57,6 +57,10 @@ export interface LoanSetup {
 /**
  * How a skipped payment is handled. Servicers differ, so confirm yours:
  *
+ * - `catchUp`: a hardship grace period. Nothing is paid now; the whole
+ *   missed payment (P&I, PMI and escrow) becomes past due and is paid back in
+ *   later months, per a catch-up plan. Nothing is forgiven, no interest is
+ *   added, and the loan's length doesn't change.
  * - `capitalize`: nothing is paid; the month's interest is added to the
  *   balance and the same monthly payment continues, so the loan runs longer.
  *   Typical of "skip-a-payment" programs.
@@ -66,7 +70,16 @@ export interface LoanSetup {
  *
  * Either way no PMI or escrow is collected that month.
  */
-export type SkipMode = 'capitalize' | 'defer';
+export type SkipMode = 'catchUp' | 'capitalize' | 'defer';
+
+/** The parts of a missed payment, or of a catch-up amount paid back later. */
+export interface PaymentParts {
+  principal: Cents;
+  interest: Cents;
+  pmi: Cents;
+  escrow: Cents;
+  total: Cents;
+}
 
 /**
  * A change recorded against the schedule. Adjustments come from the
@@ -85,7 +98,12 @@ export type Adjustment =
   /** New monthly PMI amount from this payment onward (0 = servicer stopped PMI). */
   | { kind: 'pmi'; fromPayment: number; amount: Cents }
   /** This payment is skipped, with the servicer's approval. */
-  | { kind: 'skip'; payment: number; mode: SkipMode };
+  | { kind: 'skip'; payment: number; mode: SkipMode }
+  /**
+   * Pay back everything past due from `catchUp` skips, spread evenly over
+   * `months` payments starting with `fromPayment`.
+   */
+  | { kind: 'catchUpPlan'; fromPayment: number; months: number };
 
 export type AdjustmentKind = Adjustment['kind'];
 
@@ -117,6 +135,10 @@ export interface ScheduleRow {
   deferred: Cents;
   /** On the final payment: the deferred balance repaid as a lump sum (included in `total`). */
   deferredRepaid: Cents;
+  /** On a `catchUp` skip: the whole missed payment, now past due. */
+  pastDue: Cents;
+  /** Past-due amounts paid back with this payment (included in `total`). */
+  catchUp: PaymentParts | null;
 }
 
 /** Amounts frozen when a month is reconciled as paid. */
@@ -167,5 +189,6 @@ export interface Schedule {
     payments: number;
     capitalizedInterest: Cents;
     deferred: Cents;
+    pastDue: Cents;
   };
 }

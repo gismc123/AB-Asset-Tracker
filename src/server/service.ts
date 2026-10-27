@@ -99,7 +99,9 @@ const WINDOW_AFTER = 20;
 const WIDE_WINDOW = 60;
 
 const RULES: PmiRemovalRule[] = ['auto78Scheduled', 'auto78Actual', 'request80'];
-const SKIP_MODES: SkipMode[] = ['capitalize', 'defer'];
+const SKIP_MODES: SkipMode[] = ['catchUp', 'capitalize', 'defer'];
+/** Longest catch-up plan accepted, in payments. */
+const MAX_CATCH_UP_MONTHS = 120;
 /** Upper bound for any amount typed in: $1 billion, in cents. */
 const MAX_AMOUNT = 100_000_000_000;
 
@@ -450,18 +452,95 @@ export class MortgageService {
 
   skip(payment: number, body: unknown) {
     const mode = bodyOf(body).mode as SkipMode;
-    if (!SKIP_MODES.includes(mode)) throw new HttpError(400, 'mode must be capitalize or defer');
+    if (!SKIP_MODES.includes(mode)) throw new HttpError(400, 'mode must be catchUp, capitalize or defer');
     const setup = this.requireSetup();
     this.row(this.build(setup), payment);
     if (this.store.getMonth(payment)) {
       throw new HttpError(409, `Payment ${payment} is already matched to a bank transaction. Undo that first.`);
     }
-    this.store.setSkip(payment, mode);
+    this.store.transaction(() => {
+      this.store.setSkip(payment, mode);
+      this.dropUnusedCatchUpPlans();
+    });
     return this.state();
   }
 
   unskip(payment: number) {
-    this.store.setSkip(payment, null);
+    this.store.transaction(() => {
+      this.store.setSkip(payment, null);
+      this.dropUnusedCatchUpPlans();
+    });
+    return this.state();
+  }
+
+  /**
+   * The plan that pays back a catch-up skip at `payment`: the first plan
+   * starting after it (a plan repays everything past due when it starts).
+   */
+  private coveringPlan(payment: number): { id: number; fromPayment: number } | null {
+    let best: { id: number; fromPayment: number } | null = null;
+    for (const { id, adjustment: a } of this.store.listAdjustments()) {
+      if (a.kind !== 'catchUpPlan' || a.fromPayment <= payment) continue;
+      if (!best || a.fromPayment < best.fromPayment) best = { id, fromPayment: a.fromPayment };
+    }
+    return best;
+  }
+
+  /** Remove plans that no longer have a catch-up skip to repay. */
+  private dropUnusedCatchUpPlans() {
+    const used = new Set<number>();
+    for (const a of this.store.listAdjustments()) {
+      if (a.adjustment.kind === 'skip' && a.adjustment.mode === 'catchUp') {
+        const plan = this.coveringPlan(a.adjustment.payment);
+        if (plan) used.add(plan.id);
+      }
+    }
+    for (const a of this.store.listAdjustments()) {
+      if (a.adjustment.kind === 'catchUpPlan' && !used.has(a.id)) this.store.deleteAdjustment(a.id);
+    }
+  }
+
+  /**
+   * Plan how to pay back the past-due amount from the catch-up skip at
+   * `payment`: spread over `months` payments starting with `fromPayment`.
+   * Replaces the plan that currently covers it.
+   */
+  setCatchUpPlan(payment: number, body: unknown) {
+    const b = bodyOf(body);
+    const fromPayment = b.fromPayment;
+    const months = b.months;
+    const setup = this.requireSetup();
+    const schedule = this.build(setup);
+    const row = this.row(schedule, payment);
+    if (row.skipped !== 'catchUp') throw new HttpError(409, `Payment ${payment} isn't a missed payment to catch up`);
+    if (!Number.isInteger(fromPayment) || (fromPayment as number) <= payment) {
+      throw new HttpError(400, 'The catch-up has to start with a payment after the missed one');
+    }
+    if (!Number.isInteger(months) || (months as number) < 1 || (months as number) > MAX_CATCH_UP_MONTHS) {
+      throw new HttpError(400, `Spread the catch-up over 1 to ${MAX_CATCH_UP_MONTHS} payments`);
+    }
+    const from = fromPayment as number;
+    const n = months as number;
+    if (from + n - 1 > schedule.rows.length) throw new HttpError(400, 'That plan runs past the end of the loan');
+    const months_ = new Map(this.store.listMonths().map((m) => [m.payment, m]));
+    for (let k = from; k < from + n; k++) {
+      if (months_.has(k)) throw new HttpError(409, `Payment ${k} is already matched to a bank transaction, so the plan can't include it`);
+      if (schedule.rows[k - 1]!.skipped) throw new HttpError(409, `Payment ${k} is skipped, so the plan can't include it`);
+    }
+    this.store.transaction(() => {
+      const existing = this.coveringPlan(payment);
+      if (existing) this.store.deleteAdjustment(existing.id);
+      for (const a of this.store.listAdjustments()) {
+        if (a.adjustment.kind === 'catchUpPlan' && a.adjustment.fromPayment === from) this.store.deleteAdjustment(a.id);
+      }
+      this.store.addAdjustment({ kind: 'catchUpPlan', fromPayment: from, months: n }, null);
+    });
+    return this.state();
+  }
+
+  clearCatchUpPlan(payment: number) {
+    const plan = this.coveringPlan(payment);
+    if (plan) this.store.deleteAdjustment(plan.id);
     return this.state();
   }
 

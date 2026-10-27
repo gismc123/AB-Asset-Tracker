@@ -288,3 +288,45 @@ describe('loan details', () => {
     await expectHttp(() => service.saveDetails({ fields: {}, custom: Array.from({ length: 31 }, () => ({ label: 'a', value: 'b' })) }), 400);
   });
 });
+
+describe('catch-up plans', () => {
+  it('spreads missed payments over later months and cleans up when the skip goes', () => {
+    service.skip(2, { mode: 'catchUp' });
+    service.skip(3, { mode: 'catchUp' });
+    const s = service.setCatchUpPlan(3, { fromPayment: 5, months: 2 });
+    const rows = s.schedule!.rows;
+    expect(rows[4]!.catchUp!.total + rows[5]!.catchUp!.total).toBe(rows[1]!.pastDue + rows[2]!.pastDue);
+    expect(s.summary!.pastDue).toBe(rows[1]!.pastDue + rows[2]!.pastDue); // both due dates passed (today 2025-06-15)
+
+    // Changing the plan replaces it.
+    service.setCatchUpPlan(2, { fromPayment: 6, months: 3 });
+    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
+
+    service.unskip(2);
+    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
+    service.unskip(3);
+    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(0);
+  });
+
+  it('validates the plan', async () => {
+    await expectHttp(() => service.setCatchUpPlan(2, { fromPayment: 4, months: 1 }), 409); // not skipped
+    service.skip(2, { mode: 'catchUp' });
+    await expectHttp(() => service.setCatchUpPlan(2, { fromPayment: 2, months: 1 }), 400);
+    await expectHttp(() => service.setCatchUpPlan(2, { fromPayment: 4, months: 0 }), 400);
+    await expectHttp(() => service.setCatchUpPlan(2, { fromPayment: 359, months: 5 }), 400);
+    service.skip(5, { mode: 'capitalize' });
+    await expectHttp(() => service.setCatchUpPlan(2, { fromPayment: 4, months: 3 }), 409);
+    source.add('t3', '2025-06-01', -row(3).total);
+    await service.match(3, { transactionId: 't3' });
+    await expectHttp(() => service.setCatchUpPlan(2, { fromPayment: 3, months: 1 }), 409);
+  });
+
+  it('a catch-up month reconciles against the larger amount', async () => {
+    service.skip(1, { mode: 'catchUp' });
+    service.setCatchUpPlan(1, { fromPayment: 2, months: 1 });
+    source.add('t2', '2025-05-01', -row(2).total);
+    expect(row(2).catchUp!.total).toBe(row(1).pastDue);
+    expect((await service.match(2, { transactionId: 't2' })).status).toBe('paid');
+    expect(service.state().summary!.pastDue).toBe(0);
+  });
+});
