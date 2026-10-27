@@ -9,6 +9,7 @@ import type {
   PmiMilestone,
   Schedule,
   ScheduleRow,
+  SkipMode,
 } from './types.js';
 
 /** Hard stop so a bad override can never loop forever. */
@@ -76,6 +77,15 @@ function sumFor(adjustments: readonly Adjustment[], kind: 'pennyOffset' | 'extra
   return total;
 }
 
+function skipAt(adjustments: readonly Adjustment[], k: number): SkipMode | null {
+  let mode: SkipMode | null = null;
+  for (const a of adjustments) if (a.kind === 'skip' && a.payment === k) mode = a.mode;
+  return mode;
+}
+
+/** Fields a row has when nothing was skipped. */
+const NOT_SKIPPED = { skipped: null, capitalizedInterest: 0, deferred: 0, deferredRepaid: 0 } as const;
+
 export function standingExtraAt(setup: LoanSetup, adjustments: readonly Adjustment[], k: number): Cents {
   return valueFrom(adjustments, 'standingExtra', k, setup.extraPrincipal).amount;
 }
@@ -91,6 +101,7 @@ function amortize(
   const rows: ScheduleRow[] = [];
   const termMonths = setup.termYears * 12;
   let balance = setup.originalAmount;
+  let deferredBalance = 0;
 
   for (let k = 1; balance > 0; k++) {
     if (k > MAX_PAYMENTS) {
@@ -101,12 +112,32 @@ function amortize(
 
     if (lock) {
       const principal = Math.min(lock.principal, balance);
-      rows.push({ ...lock, payment: k, dueDate, beginningBalance: balance, principal, endingBalance: balance - principal, locked: true });
+      // Locks saved before skips existed lack the skip fields.
+      rows.push({ ...NOT_SKIPPED, ...lock, payment: k, dueDate, beginningBalance: balance, principal, endingBalance: balance - principal, locked: true });
       balance -= principal;
       continue;
     }
 
+    const skip = withExtras ? skipAt(adjustments, k) : null;
     const interest = monthlyInterest(balance, setup.annualRatePercent);
+    const empty = { payment: k, dueDate, beginningBalance: balance, extraPrincipal: 0, pennyOffset: 0, pmi: 0, escrow: 0, total: 0, locked: false };
+
+    if (skip === 'capitalize') {
+      rows.push({
+        ...empty,
+        ...NOT_SKIPPED,
+        interest: 0,
+        scheduledPrincipal: 0,
+        principal: 0,
+        principalAndInterest: 0,
+        endingBalance: balance + interest,
+        skipped: 'capitalize',
+        capitalizedInterest: interest,
+      });
+      balance += interest;
+      continue;
+    }
+
     let scheduledPrincipal = pi - interest;
     if (scheduledPrincipal <= 0) {
       throw new SetupError([
@@ -116,8 +147,27 @@ function amortize(
     scheduledPrincipal = Math.min(scheduledPrincipal, balance);
     // Rounding the payment to the cent leaves a few cents over at the end of
     // the term. Like lenders do, fold that residue into the final payment
-    // instead of creating a tiny extra one.
-    if (k === termMonths && balance - scheduledPrincipal < pi) scheduledPrincipal = balance;
+    // instead of creating a tiny extra one. Only a small residue: after a
+    // skipped payment the loan genuinely runs longer.
+    if (k >= termMonths && balance - scheduledPrincipal <= Math.max(100, Math.round(pi * 0.02))) scheduledPrincipal = balance;
+
+    if (skip === 'defer') {
+      const deferred = scheduledPrincipal + interest;
+      rows.push({
+        ...empty,
+        ...NOT_SKIPPED,
+        interest,
+        scheduledPrincipal,
+        principal: scheduledPrincipal,
+        principalAndInterest: deferred,
+        endingBalance: balance - scheduledPrincipal,
+        skipped: 'defer',
+        deferred,
+      });
+      balance -= scheduledPrincipal;
+      deferredBalance += deferred;
+      continue;
+    }
 
     let pennyOffset = withExtras ? sumFor(adjustments, 'pennyOffset', k) : 0;
     pennyOffset = Math.max(-scheduledPrincipal, Math.min(pennyOffset, balance - scheduledPrincipal));
@@ -146,8 +196,15 @@ function amortize(
       total: principalAndInterest + extra + pennyOffset + escrow,
       endingBalance: balance - principal,
       locked: false,
+      ...NOT_SKIPPED,
     });
     balance -= principal;
+  }
+  // Deferred payments come due in one lump sum with the final payment.
+  const last = rows.at(-1);
+  if (last && deferredBalance > 0) {
+    last.deferredRepaid = deferredBalance;
+    last.total += deferredBalance;
   }
   return rows;
 }
@@ -192,7 +249,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
   const pmiStart = setup.pmiStartDate ?? setup.firstPaymentDate;
 
   for (const row of rows) {
-    if (row.locked) continue;
+    if (row.locked || row.skipped) continue;
     const set = valueFrom(adjustments, 'pmi', row.payment, setup.pmiMonthly);
     // A PMI change recorded on or after the planned drop means the servicer is
     // still charging it, so reality overrides the plan from that payment on.
@@ -226,13 +283,15 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
 
   const totals = rows.reduce(
     (t, r) => ({
-      interest: t.interest + r.interest,
-      principal: t.principal + r.principal,
+      interest: t.interest + (r.skipped ? 0 : r.interest),
+      principal: t.principal + (r.skipped ? 0 : r.principal),
       pmi: t.pmi + r.pmi,
       escrow: t.escrow + r.escrow,
-      payments: t.payments + 1,
+      payments: t.payments + (r.skipped ? 0 : 1),
+      capitalizedInterest: t.capitalizedInterest + r.capitalizedInterest,
+      deferred: t.deferred + r.deferred,
     }),
-    { interest: 0, principal: 0, pmi: 0, escrow: 0, payments: 0 },
+    { interest: 0, principal: 0, pmi: 0, escrow: 0, payments: 0, capitalizedInterest: 0, deferred: 0 },
   );
 
   return { piPayment, calculatedPiPayment, rows, pmi, totals };
@@ -240,6 +299,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
 
 /** Freeze a generated row so later setup edits or adjustments can't change it. */
 export function lockRow(row: ScheduleRow): LockedPayment {
+  if (row.skipped) throw new Error(`Payment ${row.payment} is skipped and can't be locked as paid`);
   const { beginningBalance: _b, endingBalance: _e, locked: _l, dueDate: _d, ...rest } = row;
   return rest;
 }

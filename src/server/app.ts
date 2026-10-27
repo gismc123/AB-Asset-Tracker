@@ -33,6 +33,12 @@ const paymentParam = (req: Request) => {
   return n;
 };
 
+const idParam = (req: Request) => {
+  const n = Number(req.params.id);
+  if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'id must be a positive whole number');
+  return n;
+};
+
 export function createApp(deps: AppDeps) {
   const { service } = deps;
   const app = express();
@@ -111,6 +117,27 @@ export function createApp(deps: AppDeps) {
   api.put('/months/:payment/offset', (req, res) => {
     res.json(service.setOffset(paymentParam(req), req.body));
   });
+  api.post('/months/:payment/skip', (req, res) => {
+    res.json(service.skip(paymentParam(req), req.body));
+  });
+  api.post('/months/:payment/unskip', (req, res) => {
+    res.json(service.unskip(paymentParam(req)));
+  });
+  api.post('/home-values', (req, res) => {
+    res.json(service.addHomeValue(req.body));
+  });
+  api.delete('/home-values/:id', (req, res) => {
+    res.json(service.deleteHomeValue(idParam(req)));
+  });
+  api.post('/escrow/entries', (req, res) => {
+    res.json(service.addEscrowEntry(req.body));
+  });
+  api.delete('/escrow/entries/:id', (req, res) => {
+    res.json(service.deleteEscrowEntry(idParam(req)));
+  });
+  api.put('/details', (req, res) => {
+    res.json(service.saveDetails(req.body));
+  });
 
   app.use(API_PREFIX, api);
 
@@ -154,10 +181,14 @@ export function summaryForDisplay(s: LoanSummary) {
       ? { number: s.nextPayment.payment, dueDate: s.nextPayment.dueDate, amount: dollars(s.nextPayment.total), daysUntil: s.nextPayment.daysUntil }
       : null,
     balance: dollars(s.balance),
+    deferredBalance: dollars(s.deferredBalance),
     scheduledBalance: dollars(s.scheduledBalance),
     percentPaid: s.percentPaid,
     equity: dollars(s.equity),
     equityPercent: s.equityPercent,
+    homeValue: s.homeValue ? { value: dollars(s.homeValue.value), asOf: s.homeValue.date } : null,
+    marketEquity: s.marketEquity === null ? null : dollars(s.marketEquity),
+    marketEquityPercent: s.marketEquityPercent,
     payoffDate: s.payoffDate,
     pmi: {
       active: s.pmi.active,

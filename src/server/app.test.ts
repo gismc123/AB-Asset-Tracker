@@ -56,6 +56,26 @@ describe('HTTP API', () => {
     expect(resolved.body.schedule.rows[0]).toMatchObject({ status: 'paid', pennyOffset: 2 });
   });
 
+  it('skips a payment, records escrow and home values, and saves details', async () => {
+    await authed(request(app).put('/mortgage-api/loan').send(SAMPLE_SETUP));
+    const skipped = await authed(request(app).post('/mortgage-api/months/2/skip').send({ mode: 'defer' }));
+    expect(skipped.body.schedule.rows[1].status).toBe('skipped');
+    expect((await authed(request(app).post('/mortgage-api/months/2/unskip'))).body.schedule.rows[1].status).toBe('scheduled');
+
+    const esc = await authed(request(app).post('/mortgage-api/escrow/entries').send({ date: '2025-05-01', kind: 'propertyTax', amount: 90_000 }));
+    const entryId = esc.body.analysis.escrow.lines[0].entryId;
+    expect((await authed(request(app).delete(`/mortgage-api/escrow/entries/${entryId}`))).status).toBe(200);
+
+    const hv = await authed(request(app).post('/mortgage-api/home-values').send({ date: '2025-05-01', value: 36_000_000 }));
+    expect(hv.body.analysis.equity.homeValue).toBe(36_000_000);
+    expect((await authed(request(app).delete(`/mortgage-api/home-values/${hv.body.homeValues[0].id}`))).status).toBe(200);
+
+    const det = await authed(request(app).put('/mortgage-api/details').send({ fields: { servicerName: 'Sample Servicing Co' } }));
+    expect(det.body.details.fields.servicerName).toBe('Sample Servicing Co');
+    expect((await request(app).put('/mortgage-api/details').send({ fields: {} })).status).toBe(401);
+    expect((await authed(request(app).delete('/mortgage-api/home-values/abc'))).status).toBe(400);
+  });
+
   it('returns readable 400s for bad input', async () => {
     const res = await authed(request(app).put('/mortgage-api/loan').send({ originalAmount: 'lots' }));
     expect(res.status).toBe(400);
@@ -109,6 +129,14 @@ describe('read-only summary endpoint', () => {
     expect(res.body.pmi.paymentsUntilDrop).toBeGreaterThan(0);
     expect(res.body.pmi.dropDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(res.body.pmi.requestRemovalDate < res.body.pmi.automaticRemovalDate).toBe(true);
+  });
+
+  it('never includes loan details such as the account number', async () => {
+    svc.saveSetup(SAMPLE_SETUP);
+    svc.saveDetails({ fields: { loanNumber: 'SAMPLE-0000-9999', servicerName: 'Sample Servicing Co' } });
+    const res = await request(withToken()).get(`/mortgage-api/v1/summary?token=${SUMMARY}`);
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toMatch(/SAMPLE-0000-9999|Sample Servicing/);
   });
 
   it('never accepts the summary token for the full API', async () => {

@@ -55,6 +55,20 @@ export interface LoanSetup {
 }
 
 /**
+ * How a skipped payment is handled. Servicers differ, so confirm yours:
+ *
+ * - `capitalize`: nothing is paid; the month's interest is added to the
+ *   balance and the same monthly payment continues, so the loan runs longer.
+ *   Typical of "skip-a-payment" programs.
+ * - `defer`: nothing is paid; the missed principal and interest move to a
+ *   separate, interest-free balance due in one lump sum when the loan is paid
+ *   off. Typical of payment deferral after forbearance.
+ *
+ * Either way no PMI or escrow is collected that month.
+ */
+export type SkipMode = 'capitalize' | 'defer';
+
+/**
  * A change recorded against the schedule. Adjustments come from the
  * reconciliation flow (or are entered by hand) and are replayed every time
  * the schedule is generated, so later months always recalculate.
@@ -69,7 +83,9 @@ export type Adjustment =
   /** New monthly escrow amount from this payment onward. */
   | { kind: 'escrow'; fromPayment: number; amount: Cents }
   /** New monthly PMI amount from this payment onward (0 = servicer stopped PMI). */
-  | { kind: 'pmi'; fromPayment: number; amount: Cents };
+  | { kind: 'pmi'; fromPayment: number; amount: Cents }
+  /** This payment is skipped, with the servicer's approval. */
+  | { kind: 'skip'; payment: number; mode: SkipMode };
 
 export type AdjustmentKind = Adjustment['kind'];
 
@@ -93,6 +109,14 @@ export interface ScheduleRow {
   endingBalance: Cents;
   /** True when the row came from locked, reconciled actual amounts. */
   locked: boolean;
+  /** Set when this payment is skipped. A skipped row has `total` 0. */
+  skipped: SkipMode | null;
+  /** Interest added to the balance by a `capitalize` skip (not paid that month). */
+  capitalizedInterest: Cents;
+  /** Principal and interest moved to the deferred balance by a `defer` skip. */
+  deferred: Cents;
+  /** On the final payment: the deferred balance repaid as a lump sum (included in `total`). */
+  deferredRepaid: Cents;
 }
 
 /** Amounts frozen when a month is reconciled as paid. */
@@ -131,5 +155,17 @@ export interface Schedule {
   calculatedPiPayment: Cents;
   rows: ScheduleRow[];
   pmi: PmiInfo;
-  totals: { interest: Cents; principal: Cents; pmi: Cents; escrow: Cents; payments: number };
+  /**
+   * Interest, principal, PMI and escrow actually collected (skipped months
+   * contribute nothing), plus what the skips cost.
+   */
+  totals: {
+    interest: Cents;
+    principal: Cents;
+    pmi: Cents;
+    escrow: Cents;
+    payments: number;
+    capitalizedInterest: Cents;
+    deferred: Cents;
+  };
 }

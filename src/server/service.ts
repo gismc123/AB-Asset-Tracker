@@ -1,6 +1,11 @@
 import {
   addDays,
+  analyzeEquity,
   compareToSchedule,
+  escrowReport,
+  isEscrowKind,
+  isValidISODate,
+  periodBreakouts,
   generateSchedule,
   lockRow,
   MAX_PENNY_OFFSET,
@@ -10,18 +15,22 @@ import {
   summarize,
   validateSetup,
   type Cents,
+  type EquityAnalysis,
+  type EscrowReport,
   type ISODate,
   type LoanSetup,
   type LockedPayment,
   type LoanSummary,
+  type PeriodBreakouts,
   type PmiInfo,
   type PmiRemovalRule,
   type Resolution,
   type Schedule,
   type ScheduleRow,
+  type SkipMode,
 } from '../engine/index.js';
 import type { BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
-import type { MonthRecord, Settings, Store, StoredAdjustment } from './db.js';
+import { LOAN_DETAIL_FIELDS, type LoanDetails, type MonthRecord, type Settings, type Store, type StoredAdjustment, type StoredHomeValue } from './db.js';
 
 export class HttpError extends Error {
   constructor(
@@ -33,7 +42,7 @@ export class HttpError extends Error {
   }
 }
 
-export type RowStatus = 'scheduled' | 'flagged' | 'paid';
+export type RowStatus = 'scheduled' | 'flagged' | 'paid' | 'skipped';
 
 export interface MonthView extends ScheduleRow {
   status: RowStatus;
@@ -56,6 +65,13 @@ export interface StateView {
   } | null;
   summary: LoanSummary | null;
   adjustments: StoredAdjustment[];
+  homeValues: StoredHomeValue[];
+  details: LoanDetails;
+  analysis: {
+    equity: EquityAnalysis;
+    periods: Record<'paid' | 'scheduled', PeriodBreakouts>;
+    escrow: EscrowReport;
+  } | null;
 }
 
 export interface Candidate extends BudgetTransaction {
@@ -83,6 +99,54 @@ const WINDOW_AFTER = 20;
 const WIDE_WINDOW = 60;
 
 const RULES: PmiRemovalRule[] = ['auto78Scheduled', 'auto78Actual', 'request80'];
+const SKIP_MODES: SkipMode[] = ['capitalize', 'defer'];
+/** Upper bound for any amount typed in: $1 billion, in cents. */
+const MAX_AMOUNT = 100_000_000_000;
+
+function bodyOf(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected a JSON object');
+  return body as Record<string, unknown>;
+}
+
+function dateField(b: Record<string, unknown>, key: string): ISODate {
+  if (!isValidISODate(b[key])) throw new HttpError(400, `${key} must be a date like 2026-11-01`);
+  return b[key] as ISODate;
+}
+
+function amountField(b: Record<string, unknown>, key: string): Cents {
+  const v = b[key];
+  if (!Number.isInteger(v) || (v as number) <= 0 || (v as number) > MAX_AMOUNT) {
+    throw new HttpError(400, `${key} must be a positive amount in cents`);
+  }
+  return v as Cents;
+}
+
+function textField(b: Record<string, unknown>, key: string, max: number): string {
+  const v = b[key] ?? '';
+  if (typeof v !== 'string') throw new HttpError(400, `${key} must be text`);
+  if (v.length > max) throw new HttpError(400, `${key} is too long (max ${max} characters)`);
+  return v.trim();
+}
+
+/** Coerce untrusted JSON into LoanDetails, dropping unknown fields and empty values. */
+export function parseDetails(body: unknown): LoanDetails {
+  const b = bodyOf(body);
+  const fieldsIn = b.fields && typeof b.fields === 'object' ? (b.fields as Record<string, unknown>) : {};
+  const fields: LoanDetails['fields'] = {};
+  for (const key of LOAN_DETAIL_FIELDS) {
+    const v = textField(fieldsIn, key, key === 'notes' ? 4000 : 500);
+    if (v) fields[key] = v;
+  }
+  const customIn = Array.isArray(b.custom) ? b.custom : [];
+  if (customIn.length > 30) throw new HttpError(400, 'Keep it to 30 extra fields or fewer');
+  const custom = customIn
+    .map((c) => {
+      const o = c && typeof c === 'object' ? (c as Record<string, unknown>) : {};
+      return { label: textField(o, 'label', 80), value: textField(o, 'value', 500) };
+    })
+    .filter((c) => c.label || c.value);
+  return { fields, custom };
+}
 
 /** Coerce untrusted JSON into a LoanSetup. Validation happens in the engine. */
 export function parseSetup(body: unknown): LoanSetup {
@@ -162,16 +226,21 @@ export class MortgageService {
       source: this.source.status(),
       today: this.today(),
       adjustments: this.store.listAdjustments(),
+      homeValues: this.store.listHomeValues(),
+      details: this.store.getDetails(),
     };
-    if (!setup) return { ...base, schedule: null, summary: null };
+    if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
 
     const schedule = this.build(setup);
     const months = new Map(this.store.listMonths().map((m) => [m.payment, m]));
+    const today = this.today();
+    const paid = this.paidSet();
+    const paidOn = new Map([...months.values()].filter((m) => m.status === 'paid').map((m) => [m.payment, m.transactionDate]));
     const rows: MonthView[] = schedule.rows.map((r) => {
       const m = months.get(r.payment);
       return {
         ...r,
-        status: m?.status ?? 'scheduled',
+        status: m?.status ?? (r.skipped ? 'skipped' : 'scheduled'),
         match: m
           ? {
               transactionId: m.transactionId,
@@ -192,9 +261,17 @@ export class MortgageService {
         totals: schedule.totals,
         pmi: schedule.pmi,
         rows,
-        currentPayment: rows.find((r) => r.status !== 'paid')?.payment ?? null,
+        currentPayment: rows.find((r) => r.status !== 'paid' && r.status !== 'skipped')?.payment ?? null,
       },
-      summary: summarize(setup, schedule, this.paidSet(), this.today()),
+      summary: summarize(setup, schedule, paid, today, base.homeValues),
+      analysis: {
+        equity: analyzeEquity(setup, schedule, paid, today, base.homeValues),
+        periods: {
+          paid: periodBreakouts(schedule.rows, paidOn, today, 'paid'),
+          scheduled: periodBreakouts(schedule.rows, paidOn, today, 'scheduled'),
+        },
+        escrow: escrowReport(schedule.rows, paidOn, this.store.listEscrowEntries(), today),
+      },
     };
   }
 
@@ -205,7 +282,7 @@ export class MortgageService {
   /** Read-only snapshot for dashboards. Null when the loan is not set up. */
   summary(): LoanSummary | null {
     const setup = this.store.getSetup();
-    return setup ? summarize(setup, this.build(setup), this.paidSet(), this.today()) : null;
+    return setup ? summarize(setup, this.build(setup), this.paidSet(), this.today(), this.store.listHomeValues()) : null;
   }
 
   saveSetup(body: unknown) {
@@ -264,6 +341,7 @@ export class MortgageService {
 
     const setup = this.requireSetup();
     const row = this.row(this.build(setup), payment);
+    if (row.skipped) throw new HttpError(409, `Payment ${payment} is marked as skipped. Undo the skip first.`);
     const existing = this.store.getMonth(payment);
     if (existing?.status === 'paid') throw new HttpError(409, `Payment ${payment} is already reconciled. Undo it first.`);
     const usedBy = this.store.monthForTransaction(transactionId);
@@ -365,6 +443,59 @@ export class MortgageService {
       this.store.deleteManualOffset(payment);
       if (amount !== 0) this.store.addAdjustment({ kind: 'pennyOffset', payment, amount: amount as number }, null);
     });
+    return this.state();
+  }
+
+  // --- skipped payments -----------------------------------------------------------
+
+  skip(payment: number, body: unknown) {
+    const mode = bodyOf(body).mode as SkipMode;
+    if (!SKIP_MODES.includes(mode)) throw new HttpError(400, 'mode must be capitalize or defer');
+    const setup = this.requireSetup();
+    this.row(this.build(setup), payment);
+    if (this.store.getMonth(payment)) {
+      throw new HttpError(409, `Payment ${payment} is already matched to a bank transaction. Undo that first.`);
+    }
+    this.store.setSkip(payment, mode);
+    return this.state();
+  }
+
+  unskip(payment: number) {
+    this.store.setSkip(payment, null);
+    return this.state();
+  }
+
+  // --- home value estimates ---------------------------------------------------------
+
+  addHomeValue(body: unknown) {
+    const b = bodyOf(body);
+    this.store.addHomeValue({ date: dateField(b, 'date'), value: amountField(b, 'value'), source: textField(b, 'source', 100) || 'Estimate' });
+    return this.state();
+  }
+
+  deleteHomeValue(id: number) {
+    if (!this.store.deleteHomeValue(id)) throw new HttpError(404, 'That home value is not on file');
+    return this.state();
+  }
+
+  // --- escrow ---------------------------------------------------------------------
+
+  addEscrowEntry(body: unknown) {
+    const b = bodyOf(body);
+    if (!isEscrowKind(b.kind)) throw new HttpError(400, 'Unknown escrow entry kind');
+    this.store.addEscrowEntry({ date: dateField(b, 'date'), kind: b.kind, amount: amountField(b, 'amount'), note: textField(b, 'note', 200) });
+    return this.state();
+  }
+
+  deleteEscrowEntry(id: number) {
+    if (!this.store.deleteEscrowEntry(id)) throw new HttpError(404, 'That escrow entry is not on file');
+    return this.state();
+  }
+
+  // --- loan details ------------------------------------------------------------------
+
+  saveDetails(body: unknown) {
+    this.store.saveDetails(parseDetails(body));
     return this.state();
   }
 }

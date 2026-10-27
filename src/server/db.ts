@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import type { Adjustment, AdjustmentKind, Cents, ISODate, LoanSetup, LockedPayment } from '../engine/index.js';
+import type { Adjustment, AdjustmentKind, Cents, EscrowEntry, EscrowKind, HomeValueEstimate, ISODate, LoanSetup, LockedPayment, SkipMode } from '../engine/index.js';
 import type { Resolution } from '../engine/index.js';
 
 /**
  * The tracker's own database. It holds only what the tracker owns: the loan
- * setup, schedule adjustments, and the reconciliation status of each month.
+ * setup, schedule adjustments, the reconciliation status of each month,
+ * home value estimates, escrow entries, and the loan details you record.
  * Actual's data is never copied here beyond the matched transaction's id,
  * date, amount and payee, kept so the month can show what it was matched to.
  */
@@ -40,6 +41,38 @@ export interface Settings {
   categoryId: string | null;
 }
 
+export interface StoredHomeValue extends HomeValueEstimate {
+  id: number;
+}
+
+/** Reference details about the loan. Free text; every field optional. */
+export interface LoanDetails {
+  fields: Partial<Record<LoanDetailField, string>>;
+  /** Anything else worth keeping, as label/value pairs. */
+  custom: { label: string; value: string }[];
+}
+
+export const LOAN_DETAIL_FIELDS = [
+  'servicerName',
+  'servicerPhone',
+  'servicerWebsite',
+  'servicerAddress',
+  'loanNumber',
+  'lenderName',
+  'loanType',
+  'mersMin',
+  'propertyAddress',
+  'insuranceCarrier',
+  'insurancePolicyNumber',
+  'insuranceAgent',
+  'taxParcelNumber',
+  'taxAuthority',
+  'pmiCompany',
+  'pmiCertificateNumber',
+  'notes',
+] as const;
+export type LoanDetailField = (typeof LOAN_DETAIL_FIELDS)[number];
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
@@ -71,11 +104,27 @@ CREATE TABLE IF NOT EXISTS months (
   updated_at         TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS months_transaction ON months (transaction_id);
+CREATE TABLE IF NOT EXISTS home_values (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  date       TEXT NOT NULL,
+  value      INTEGER NOT NULL,
+  source     TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS escrow_entries (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  date       TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  amount     INTEGER NOT NULL,
+  note       TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 const SINGLE_PAYMENT_KINDS: AdjustmentKind[] = ['pennyOffset', 'extraPrincipal'];
 
-function toAdjustment(kind: AdjustmentKind, payment: number, amount: Cents): Adjustment {
+function toAdjustment(kind: AdjustmentKind, payment: number, amount: Cents, mode: string | null): Adjustment {
+  if (kind === 'skip') return { kind, payment, mode: mode === 'defer' ? 'defer' : 'capitalize' };
   return (SINGLE_PAYMENT_KINDS.includes(kind) ? { kind, payment, amount } : { kind, fromPayment: payment, amount }) as Adjustment;
 }
 
@@ -88,7 +137,16 @@ export class Store {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.exec(SCHEMA);
-    this.db.prepare(`INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '1')`).run();
+    this.migrate();
+  }
+
+  /** Bring a database created by an older version up to date. */
+  private migrate() {
+    const columns = (this.db.prepare(`PRAGMA table_info(adjustments)`).all() as { name: string }[]).map((c) => c.name);
+    if (!columns.includes('mode')) this.db.exec(`ALTER TABLE adjustments ADD COLUMN mode TEXT`);
+    this.db
+      .prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', '2') ON CONFLICT (key) DO UPDATE SET value = excluded.value`)
+      .run();
   }
 
   transaction<T>(fn: () => T): T {
@@ -132,12 +190,13 @@ export class Store {
       kind: AdjustmentKind;
       payment: number;
       amount: number;
+      mode: string | null;
       source_payment: number | null;
       created_at: string;
     }[];
     return rows.map((r) => ({
       id: r.id,
-      adjustment: toAdjustment(r.kind, r.payment, r.amount),
+      adjustment: toAdjustment(r.kind, r.payment, r.amount, r.mode),
       sourcePayment: r.source_payment,
       createdAt: r.created_at,
     }));
@@ -145,10 +204,19 @@ export class Store {
 
   addAdjustment(a: Adjustment, sourcePayment: number | null): number {
     const payment = 'payment' in a ? a.payment : a.fromPayment;
+    const amount = 'amount' in a ? a.amount : 0;
+    const mode = a.kind === 'skip' ? a.mode : null;
     const result = this.db
-      .prepare(`INSERT INTO adjustments (kind, payment, amount, source_payment, created_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(a.kind, payment, a.amount, sourcePayment, new Date().toISOString());
+      .prepare(`INSERT INTO adjustments (kind, payment, amount, mode, source_payment, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(a.kind, payment, amount, mode, sourcePayment, new Date().toISOString());
     return Number(result.lastInsertRowid);
+  }
+
+  setSkip(payment: number, mode: SkipMode | null) {
+    this.transaction(() => {
+      this.db.prepare(`DELETE FROM adjustments WHERE kind = 'skip' AND payment = ?`).run(payment);
+      if (mode) this.addAdjustment({ kind: 'skip', payment, mode }, null);
+    });
   }
 
   deleteAdjustmentsFrom(sourcePayment: number) {
@@ -196,6 +264,53 @@ export class Store {
 
   deleteMonth(payment: number) {
     this.db.prepare(`DELETE FROM months WHERE payment = ?`).run(payment);
+  }
+
+  // --- home value estimates -----------------------------------------------------
+
+  listHomeValues(): StoredHomeValue[] {
+    return this.db.prepare(`SELECT id, date, value, source FROM home_values ORDER BY date, id`).all() as StoredHomeValue[];
+  }
+
+  addHomeValue(v: HomeValueEstimate): number {
+    const result = this.db
+      .prepare(`INSERT INTO home_values (date, value, source, created_at) VALUES (?, ?, ?, ?)`)
+      .run(v.date, v.value, v.source, new Date().toISOString());
+    return Number(result.lastInsertRowid);
+  }
+
+  deleteHomeValue(id: number): boolean {
+    return this.db.prepare(`DELETE FROM home_values WHERE id = ?`).run(id).changes > 0;
+  }
+
+  // --- escrow entries ---------------------------------------------------------------
+
+  listEscrowEntries(): EscrowEntry[] {
+    return this.db.prepare(`SELECT id, date, kind, amount, note FROM escrow_entries ORDER BY date, id`).all() as EscrowEntry[];
+  }
+
+  addEscrowEntry(e: Omit<EscrowEntry, 'id'>): number {
+    const result = this.db
+      .prepare(`INSERT INTO escrow_entries (date, kind, amount, note, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(e.date, e.kind satisfies EscrowKind, e.amount, e.note, new Date().toISOString());
+    return Number(result.lastInsertRowid);
+  }
+
+  deleteEscrowEntry(id: number): boolean {
+    return this.db.prepare(`DELETE FROM escrow_entries WHERE id = ?`).run(id).changes > 0;
+  }
+
+  // --- loan details -------------------------------------------------------------------
+
+  getDetails(): LoanDetails {
+    const row = this.db.prepare(`SELECT value FROM meta WHERE key = 'details'`).get() as { value: string } | undefined;
+    return { fields: {}, custom: [], ...(row ? (JSON.parse(row.value) as Partial<LoanDetails>) : {}) };
+  }
+
+  saveDetails(details: LoanDetails) {
+    this.db
+      .prepare(`INSERT INTO meta (key, value) VALUES ('details', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`)
+      .run(JSON.stringify(details));
   }
 
   close() {

@@ -195,3 +195,96 @@ describe('manual penny offset', () => {
     await expectHttp(() => service.setOffset(3, { amount: 250 }), 400);
   });
 });
+
+describe('skipped payments', () => {
+  it('marks a month skipped, moves on to the next one, and can be undone', () => {
+    const s = service.skip(1, { mode: 'capitalize' });
+    expect(s.schedule!.rows[0]).toMatchObject({ status: 'skipped', skipped: 'capitalize', total: 0 });
+    expect(s.schedule!.currentPayment).toBe(2);
+    const undone = service.unskip(1);
+    expect(undone.schedule!.rows[0]).toMatchObject({ status: 'scheduled', skipped: null });
+  });
+
+  it('replaces the mode when skipped again', () => {
+    service.skip(2, { mode: 'capitalize' });
+    const s = service.skip(2, { mode: 'defer' });
+    expect(s.schedule!.rows[1]!.skipped).toBe('defer');
+    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'skip')).toHaveLength(1);
+  });
+
+  it('refuses bad modes, matched months, and matching a skipped month', async () => {
+    await expectHttp(() => service.skip(1, { mode: 'later' }), 400);
+    await expectHttp(() => service.skip(999, { mode: 'defer' }), 404);
+    source.add('t1', '2025-04-01', -row(1).total);
+    await service.match(1, { transactionId: 't1' });
+    await expectHttp(() => service.skip(1, { mode: 'defer' }), 409);
+    service.skip(2, { mode: 'defer' });
+    source.add('t2', '2025-05-01', -row(3).total);
+    await expectHttp(service.match(2, { transactionId: 't2' }), 409);
+  });
+
+  it('survives a reopen (the skip mode is stored)', () => {
+    service.skip(3, { mode: 'defer' });
+    expect(store.listAdjustments().at(-1)!.adjustment).toEqual({ kind: 'skip', payment: 3, mode: 'defer' });
+  });
+});
+
+describe('equity, periods and escrow in state', () => {
+  it('reports equity from the original value until an estimate is added', () => {
+    let s = service.state();
+    expect(s.analysis!.equity).toMatchObject({ isEstimate: false, homeValue: SAMPLE_SETUP.originalHomeValue });
+    s = service.addHomeValue({ date: '2025-06-01', value: 37_000_000, source: 'Online estimate' });
+    expect(s.analysis!.equity).toMatchObject({ isEstimate: true, homeValue: 37_000_000, homeValueSource: 'Online estimate' });
+    expect(s.summary!.marketEquity).toBe(37_000_000 - s.summary!.balance);
+    const id = s.homeValues[0]!.id;
+    expect(service.deleteHomeValue(id).homeValues).toHaveLength(0);
+  });
+
+  it('validates home values', async () => {
+    await expectHttp(() => service.addHomeValue({ date: 'June', value: 1 }), 400);
+    await expectHttp(() => service.addHomeValue({ date: '2025-06-01', value: -5 }), 400);
+    await expectHttp(() => service.addHomeValue({ date: '2025-06-01', value: 12.5 }), 400);
+    await expectHttp(() => service.deleteHomeValue(12345), 404);
+  });
+
+  it('puts paid escrow and recorded bills into the escrow ledger', async () => {
+    source.add('t1', '2025-03-30', -row(1).total);
+    await service.match(1, { transactionId: 't1' });
+    let s = service.addEscrowEntry({ date: '2025-04-20', kind: 'homeownersInsurance', amount: 150_000, note: 'Annual premium' });
+    s = service.addEscrowEntry({ date: '2025-02-14', kind: 'deposit', amount: 200_000 });
+    const esc = s.analysis!.escrow;
+    expect(esc.lines.map((l) => l.kind)).toEqual(['deposit', 'payment', 'homeownersInsurance']);
+    expect(esc.lines[1]).toMatchObject({ date: '2025-03-30', amount: SAMPLE_SETUP.escrowMonthly });
+    expect(esc.balance).toBe(200_000 + SAMPLE_SETUP.escrowMonthly - 150_000);
+    const id = esc.lines[2]!.entryId!;
+    expect(service.deleteEscrowEntry(id).analysis!.escrow.lines).toHaveLength(2);
+    await expectHttp(() => service.addEscrowEntry({ date: '2025-04-20', kind: 'groceries', amount: 100 }), 400);
+  });
+
+  it('breaks out paid amounts by period, dated by the bank', async () => {
+    source.add('t1', '2025-03-30', -row(1).total);
+    await service.match(1, { transactionId: 't1' });
+    const p = service.state().analysis!.periods;
+    expect(p.paid.yearToDate.totals.payments).toBe(1);
+    expect(p.paid.month.totals.payments).toBe(0); // paid in March; today is June
+    expect(p.scheduled.yearToDate.totals.payments).toBe(3); // Apr, May, Jun due
+  });
+});
+
+describe('loan details', () => {
+  it('saves known fields and custom pairs, dropping blanks and unknown keys', () => {
+    const s = service.saveDetails({
+      fields: { servicerName: ' Sample Servicing Co ', loanNumber: '0000-1111', bogus: 'x', lenderName: '' },
+      custom: [{ label: 'Escrow analysis month', value: 'March' }, { label: '', value: '' }],
+    });
+    expect(s.details).toEqual({
+      fields: { servicerName: 'Sample Servicing Co', loanNumber: '0000-1111' },
+      custom: [{ label: 'Escrow analysis month', value: 'March' }],
+    });
+  });
+
+  it('rejects oversized input', async () => {
+    await expectHttp(() => service.saveDetails({ fields: { notes: 'x'.repeat(5000) } }), 400);
+    await expectHttp(() => service.saveDetails({ fields: {}, custom: Array.from({ length: 31 }, () => ({ label: 'a', value: 'b' })) }), 400);
+  });
+});
