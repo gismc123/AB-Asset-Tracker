@@ -162,8 +162,11 @@ If it doesn't, the log line above it says what's wrong; see
 ### Step 8: Add your first loan
 
 Click **Loans** in Actual's sidebar. The welcome screen asks what kind of
-loan to add, then shows only the fields that kind needs. Have your loan
-paperwork or a recent statement at hand. See [Adding a loan](#adding-a-loan)
+loan to add, then shows only the fields that kind needs.
+
+![The first-run welcome screen: a short explanation, then a choice of mortgage, auto loan or personal loan](docs/screenshots/first-run.png)
+
+ Have your loan paperwork or a recent statement at hand. See [Adding a loan](#adding-a-loan)
 for what each field means.
 
 ---
@@ -241,6 +244,7 @@ listed beneath it the way Actual lists accounts: equity is the headline
 number, and what you owe is underneath. Click a loan to open it.
 
 <img src="docs/screenshots/sidebar.png" alt="The Loans list in Actual's sidebar: a mortgage, a car loan and a personal loan, each with equity and the amount owed" width="240" />
+<img src="docs/screenshots/sidebar-dark.png" alt="The same Loans list in the dark theme" width="240" />
 
 Every loan is one of three types. The type only decides which parts are
 switched on; the math underneath is the same amortizing loan.
@@ -307,6 +311,8 @@ instead:
 
 ![Overview of a sample personal loan: payment 8 of 36, balance, percent paid, payoff today, and a payoff card with total interest and yearly fees](docs/screenshots/personal.png)
 
+![The Totals screen of a personal loan: principal, interest and yearly fees by month, quarter, year, loan to date and life of loan, with a button to add an asset](docs/screenshots/totals-personal.png)
+
 </details>
 
 It follows Actual's light and dark theme and **privacy mode**: with privacy
@@ -315,9 +321,20 @@ screens and in the sidebar list turns into Actual's privacy squiggle until
 you hover over it.
 
 <details>
+<summary>Privacy mode</summary>
+
+![The Overview screen with privacy mode on: every dollar amount, on the screen and in the sidebar list, is hidden](docs/screenshots/privacy.png)
+
+</details>
+
+<details>
 <summary>Dark theme</summary>
 
-![The Overview screen in Actual's dark theme](docs/screenshots/overview-dark.png)
+![The mortgage Overview screen in Actual's dark theme](docs/screenshots/overview-dark.png)
+
+![The car loan's Vehicle screen in the dark theme](docs/screenshots/vehicle-dark.png)
+
+![The Escrow screen in the dark theme](docs/screenshots/escrow-dark.png)
 
 </details>
 
@@ -340,7 +357,11 @@ Under the hood:
 ### Adding a loan
 
 Open **Loans** and click **+ Add loan** (with no loans yet, the welcome
-screen starts there). Pick the type, then fill in only what that type needs:
+screen starts there). Pick the type:
+
+![The Add a loan screen: cards for mortgage, auto loan and personal loan](docs/screenshots/add-loan-type.png)
+
+Then fill in only what that type needs:
 
 ![Adding a car loan: nickname, vehicle, price paid, value over time and yearly change, then the loan terms](docs/screenshots/add-loan.png)
 
@@ -377,6 +398,13 @@ Mortgage only:
 | When to drop PMI | See [PMI](#pmi-mortgages). |
 | Escrow on/off, monthly escrow | Taxes and insurance collected with the payment. |
 
+<details>
+<summary>The Setup screen of a mortgage</summary>
+
+![A mortgage's Setup screen: loan terms, the already-paying card, PMI with the removal rule, escrow, and extras](docs/screenshots/setup-mortgage.png)
+
+</details>
+
 Optional, any loan (under **Fees and payoff quote**):
 
 | Field | Notes |
@@ -386,12 +414,25 @@ Optional, any loan (under **Fees and payoff quote**):
 | Yearly fee | A percent of the original amount or of the remaining balance, charged with the first payment of each loan year (payments 1, 13, 25 and so on). Part of that month's payment. |
 | Payoff quote | An amount from your lender and its good-through date. Used for *payoff today* instead of the estimate until it expires. |
 
+![The Extras, fees and payoff card: standing extra principal, down payment, one-off fees, a yearly fee of 0.5% of the balance, and a payoff quote](docs/screenshots/setup-fees.png)
+
+A yearly fee shows up in its own column on the Schedule:
+
+<details>
+<summary>Schedule with a yearly fee</summary>
+
+![A personal loan's schedule with a Fee column: $60.00 with payment 1 and $42.24 with payment 13](docs/screenshots/schedule-personal.png)
+
+</details>
+
 The final payment absorbs the few cents of rounding left at the end of the
 term, the way lenders do it, so it can differ slightly from the others.
 
 Paid off or sold? **Archive** the loan under Setup to hide it from the
 picker, the sidebar and the summary while keeping its history. **Delete**
 removes it and everything recorded for it (you type its name to confirm).
+
+![The "This loan" card under Setup: nickname with Rename, Archive, and Delete this loan](docs/screenshots/loan-settings.png)
 
 #### A loan that's already under way
 
@@ -431,6 +472,9 @@ Once a month, after your bank has synced the payment into Actual:
    in Actual (it's remembered per loan).
 3. The screen lists transactions in that category within about three weeks
    of the due date, exact matches first. **Click the right one.**
+
+   ![Reconcile, before matching: the loan's category, one bank transaction of $2,833.12 shown as $250 over the schedule, and the scheduled breakdown](docs/screenshots/reconcile-match.png)
+
 4. **If the amount matches the schedule,** the month flips to **Paid**, its
    real amounts are locked, and you're done.
 5. **If it differs,** the month is **Flagged** and you're asked what the
@@ -442,6 +486,8 @@ Once a month, after your bank has synced the payment into Actual:
    | **Extra principal** | The extra goes to the balance this month. Tick *keep paying this every month* to make it a standing extra. Later interest and the payoff date recalculate. |
    | **Escrow changed** | Mortgages with escrow. New escrow amount from this month on, typically after your yearly escrow analysis. |
    | **PMI changed** | Mortgages with PMI. New PMI amount from this month on. If the servicer stopped charging PMI, this records it at $0. |
+
+   ![Reconcile, after matching: the month is flagged $250 over, with extra principal suggested](docs/screenshots/reconcile.png)
 
    The answer that fits best is highlighted, and answers that can't explain
    the difference are disabled. Afterwards the month is marked **Paid**.
@@ -461,6 +507,8 @@ If your lender approves skipping a payment (a hardship grace period, a
 skip-a-payment offer, forbearance, or a deferral), open that month in
 **Reconcile**, expand **Skipping this payment?**, and pick how your lender
 handles it:
+
+![The Skipping this payment? panel: missed now and caught up later, interest added to the balance, or deferred to payoff](docs/screenshots/reconcile-skip.png)
 
 | Choice | What the schedule does |
 |---|---|
@@ -491,6 +539,10 @@ vehicles (15% a year is offered as a starting point) or a rise for a home.
 The projection is only an estimate. It shapes the equity chart (starting
 from the values you entered) and shows a *projected today* figure next to
 your latest value; the headline equity always uses the value you entered.
+Set it on the value screen, where you can also rename the asset and change
+what it cost:
+
+![The About the vehicle card: name, kind, original value, date bought, and a projected yearly drop of 15%](docs/screenshots/asset-editor.png)
 
 **Vehicles** usually lose value faster than the loan is paid down at first,
 so equity can start below zero. The first milestone for a vehicle is *worth
@@ -519,7 +571,17 @@ up at the next escrow analysis.
 **Loan details.** The **Details** screen is for reference information. It's
 stored only in the add-on's database, never sent to Actual, and never
 included in the summary endpoint. Account, policy, VIN and certificate
-numbers stay masked until you click into them.
+numbers stay masked until you click into them. The fields follow the loan
+type:
+
+<details>
+<summary>Details for a mortgage and for a car loan</summary>
+
+![A mortgage's Details screen: servicer, loan, insurance and taxes, PMI, and notes](docs/screenshots/details-mortgage.png)
+
+![A car loan's Details screen: lender, vehicle (VIN, plate), insurance, and notes](docs/screenshots/details-vehicle.png)
+
+</details>
 
 ### Interest: monthly or daily
 

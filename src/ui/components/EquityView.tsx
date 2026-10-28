@@ -448,7 +448,7 @@ function AssetEditor({ state, client, onState }: Props) {
       </div>
       {d.trend !== 'manual' && (
         <p className="mt-kpi-note">
-          The projection only draws the curve ahead. It's an estimate, not a valuation: equity today always uses the latest value you entered.
+          The projection only shapes the equity chart, starting from the values you enter. It's an estimate, not a valuation: equity today always uses the latest value you entered.
         </p>
       )}
       {error && (
