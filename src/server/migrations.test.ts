@@ -7,7 +7,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Store } from './db.js';
 import { currentVersion, LATEST_VERSION, migrate } from './migrations.js';
-import { MortgageService } from './service.js';
+import { TrackerService } from './service.js';
 import { FakeSource } from './testing.js';
 
 /**
@@ -49,11 +49,15 @@ describe('migrating a single-loan database', () => {
       const file = legacyFile(name);
       const backups: string[] = [];
       const store = new Store(file, { onBackup: (f) => backups.push(f) });
-      const service = new MortgageService(store, sourceFor(name), () => TODAY[name]);
+      const service = new TrackerService(store, sourceFor(name), () => TODAY[name]).loan(1);
 
       // Every field the old release returned must come back unchanged. New
-      // fields (fees, assets, payoff) may be added alongside.
-      expect(service.state()).toMatchObject(golden(`${name}.state`));
+      // fields (fees, assets, payoff) may be added alongside. Home value
+      // estimates now live on the loan's asset.
+      const { homeValues, ...oldState } = golden(`${name}.state`);
+      const state = service.state();
+      expect(state).toMatchObject(oldState);
+      expect(state.asset!.values).toEqual(homeValues);
       expect(service.summary()).toMatchObject(golden(`${name}.summary`));
 
       expect(store.listLoans()).toMatchObject([{ id: 1, nickname: 'Mortgage', type: 'mortgage', archived: false }]);

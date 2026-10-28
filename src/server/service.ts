@@ -8,6 +8,10 @@ import {
   periodBreakouts,
   generateSchedule,
   homeAssetFor,
+  modulesOf,
+  ASSET_KINDS,
+  VALUE_TRENDS,
+  MAX_TERM_MONTHS,
   lockRow,
   MAX_PENNY_OFFSET,
   resolutionToAdjustment,
@@ -16,6 +20,13 @@ import {
   summarize,
   validateSetup,
   type Asset,
+  type AssetKind,
+  type InterestMethod,
+  type LoanModules,
+  type OneOffFee,
+  type PayoffQuote,
+  type ValueTrend,
+  type YearlyFee,
   type Cents,
   type EquityAnalysis,
   type EscrowReport,
@@ -33,7 +44,20 @@ import {
   type StartingPoint,
 } from '../engine/index.js';
 import type { BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
-import { LOAN_DETAIL_FIELDS, type LoanDetails, type LoanStore, type MonthRecord, type Settings, type Store, type StoredAdjustment, type StoredAssetValue } from './db.js';
+import {
+  LOAN_DETAIL_FIELDS,
+  LOAN_TYPES,
+  type AssetInput,
+  type AssetRecord,
+  type LoanDetails,
+  type LoanRecord,
+  type LoanStore,
+  type LoanType,
+  type MonthRecord,
+  type Settings,
+  type Store,
+  type StoredAdjustment,
+} from './db.js';
 
 export class HttpError extends Error {
   constructor(
@@ -54,6 +78,9 @@ export interface MonthView extends ScheduleRow {
 }
 
 export interface StateView {
+  loan: LoanRecord;
+  /** What the loan paid for, if recorded. Equity is measured against it. */
+  asset: AssetRecord | null;
   setup: LoanSetup | null;
   settings: Settings;
   source: SourceStatus;
@@ -69,10 +96,10 @@ export interface StateView {
   } | null;
   summary: LoanSummary | null;
   adjustments: StoredAdjustment[];
-  homeValues: StoredAssetValue[];
   details: LoanDetails;
   analysis: {
-    equity: EquityAnalysis;
+    /** Null when the loan has no asset. */
+    equity: EquityAnalysis | null;
     periods: Record<'paid' | 'scheduled', PeriodBreakouts>;
     escrow: EscrowReport;
   } | null;
@@ -185,45 +212,95 @@ export function parseSetup(body: unknown): LoanSetup {
     extraPrincipal: int('extraPrincipal'),
     startingPoint: parseStartingPoint(b.startingPoint),
   };
+  // Optional fields are only written when given, so a mortgage saved by an
+  // older UI keeps exactly the shape it always had.
+  if (b.termMonths !== undefined && b.termMonths !== null && b.termMonths !== '') {
+    setup.termMonths = int('termMonths');
+    if (Number.isInteger(setup.termMonths) && setup.termMonths >= 1 && setup.termMonths <= MAX_TERM_MONTHS) {
+      setup.termYears = Math.ceil(setup.termMonths / 12);
+    }
+  }
+  if (b.modules !== undefined) setup.modules = parseModules(b.modules);
+  if (b.interestMethod !== undefined) setup.interestMethod = b.interestMethod as InterestMethod;
+  if (b.downPayment !== undefined) setup.downPayment = nullableInt('downPayment');
+  if (b.fees !== undefined) setup.fees = parseFees(b.fees);
+  if (b.yearlyFee !== undefined) setup.yearlyFee = parseYearlyFee(b.yearlyFee);
+  if (b.payoffQuote !== undefined) setup.payoffQuote = parsePayoffQuote(b.payoffQuote);
   const problems = validateSetup(setup);
   if (problems.length) throw new HttpError(400, 'Please fix the loan setup', { problems });
   return setup;
 }
 
-function suggestionsFor(difference: Cents): Resolution[] {
+function parseModules(v: unknown): LoanModules {
+  const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  return { pmi: o.pmi === true, escrow: o.escrow === true };
+}
+
+function parseFees(v: unknown): OneOffFee[] {
+  if (!Array.isArray(v)) throw new HttpError(400, 'fees must be a list');
+  return v.map((f) => {
+    const o = f && typeof f === 'object' ? (f as Record<string, unknown>) : {};
+    return {
+      label: typeof o.label === 'string' ? o.label.trim() : '',
+      amount: typeof o.amount === 'number' ? Math.round(o.amount) : Number.NaN,
+      financed: o.financed === true,
+    };
+  });
+}
+
+function parseYearlyFee(v: unknown): YearlyFee | null {
+  if (v === null || v === '') return null;
+  const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  return { basis: o.basis as YearlyFee['basis'], percent: typeof o.percent === 'number' ? o.percent : Number.NaN };
+}
+
+function parsePayoffQuote(v: unknown): PayoffQuote | null {
+  if (v === null || v === '') return null;
+  const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  return {
+    amount: typeof o.amount === 'number' ? Math.round(o.amount) : Number.NaN,
+    goodThrough: typeof o.goodThrough === 'string' ? o.goodThrough : '',
+  };
+}
+
+function suggestionsFor(difference: Cents, modules: LoanModules): Resolution[] {
   const out: Resolution[] = [];
   if (Math.abs(difference) <= MAX_PENNY_OFFSET) out.push('rounding');
-  if (difference > 0) out.push('extraPrincipal', 'escrow', 'pmi');
-  else out.push('escrow', 'pmi');
+  if (difference > 0) out.push('extraPrincipal');
+  if (modules.escrow) out.push('escrow');
+  if (modules.pmi) out.push('pmi');
   return out;
 }
 
-export class MortgageService {
+/**
+ * Everything about one loan: its schedule, reconciliation, skips, escrow
+ * and details. Every read and write goes through a store scoped to the loan.
+ */
+export class LoanService {
   private readonly store: LoanStore;
 
   constructor(
     private readonly root: Store,
     private readonly source: BudgetSource,
     private readonly today: () => ISODate,
-    private readonly loanId = 1,
+    readonly loan: LoanRecord,
   ) {
-    this.store = root.loan(loanId);
+    this.store = root.loan(loan.id);
   }
 
-  /** The asset equity is measured against; until one is recorded, the home from the setup. */
-  private asset(setup: LoanSetup): Asset {
-    return this.root.assetForLoan(this.loanId) ?? homeAssetFor(setup);
+  /**
+   * The asset equity is measured against. A mortgage always has a home, so
+   * one without a recorded asset uses the home described by its setup.
+   */
+  private asset(setup: LoanSetup): Asset | null {
+    return this.root.assetForLoan(this.loan.id) ?? (this.loan.type === 'mortgage' ? homeAssetFor(setup) : null);
   }
 
-  private homeValues(): StoredAssetValue[] {
-    return this.root.assetForLoan(this.loanId)?.values ?? [];
-  }
-
-  /** The loan record, created on first save for a database that has none yet. */
-  private ensureLoan() {
-    if (!this.root.getLoan(this.loanId)) {
-      this.root.db.prepare(`INSERT INTO loans (id, nickname, type, created_at, archived) VALUES (?, 'Mortgage', 'mortgage', ?, 0)`).run(this.loanId, new Date().toISOString());
-    }
+  /** When each matched payment really left the bank, for daily-interest loans. */
+  private paidDates(extra?: [number, ISODate]): Map<number, ISODate> {
+    const dates = new Map(this.store.listMonths().map((m) => [m.payment, m.transactionDate]));
+    if (extra) dates.set(extra[0], extra[1]);
+    return dates;
   }
 
   private requireSetup(): LoanSetup {
@@ -232,12 +309,12 @@ export class MortgageService {
     return setup;
   }
 
-  private build(setup: LoanSetup): Schedule {
+  private build(setup: LoanSetup, paidOn?: [number, ISODate]): Schedule {
     const adjustments = this.store.listAdjustments().map((a) => a.adjustment);
     const locked = new Map<number, LockedPayment>();
     for (const m of this.store.listMonths()) if (m.status === 'paid' && m.locked) locked.set(m.payment, m.locked);
     try {
-      return generateSchedule(setup, { adjustments, locked });
+      return generateSchedule(setup, { adjustments, locked, paidDates: this.paidDates(paidOn) });
     } catch (e) {
       if (e instanceof SetupError) throw new HttpError(400, e.message, { problems: e.problems });
       throw e;
@@ -265,12 +342,13 @@ export class MortgageService {
   state(): StateView {
     const setup = this.store.getSetup();
     const base = {
+      loan: this.root.getLoan(this.loan.id) ?? this.loan,
+      asset: this.root.assetForLoan(this.loan.id),
       setup,
       settings: this.store.getSettings(),
       source: this.source.status(),
       today: this.today(),
       adjustments: this.store.listAdjustments(),
-      homeValues: this.homeValues(),
       details: this.store.getDetails(),
     };
     if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
@@ -279,6 +357,7 @@ export class MortgageService {
     const months = new Map(this.store.listMonths().map((m) => [m.payment, m]));
     const today = this.today();
     const paid = this.paidSet();
+    const asset = this.asset(setup);
     const paidOn = new Map([...months.values()].filter((m) => m.status === 'paid').map((m) => [m.payment, m.transactionDate]));
     const rows: MonthView[] = schedule.rows.map((r) => {
       const m = months.get(r.payment);
@@ -307,9 +386,9 @@ export class MortgageService {
         rows,
         currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null,
       },
-      summary: summarize(setup, schedule, paid, today, this.asset(setup)),
+      summary: summarize(setup, schedule, paid, today, asset),
       analysis: {
-        equity: analyzeEquity(setup, schedule, paid, today, this.asset(setup)),
+        equity: asset ? analyzeEquity(setup, schedule, paid, today, asset) : null,
         periods: {
           paid: periodBreakouts(schedule.rows, paidOn, today, 'paid'),
           scheduled: periodBreakouts(schedule.rows, paidOn, today, 'scheduled'),
@@ -319,17 +398,14 @@ export class MortgageService {
     };
   }
 
-  sourceStatus(): SourceStatus {
-    return this.source.status();
-  }
-
   /** Read-only snapshot for dashboards. Null when the loan is not set up. */
   summary(): LoanSummary | null {
     const setup = this.store.getSetup();
     return setup ? summarize(setup, this.build(setup), this.paidSet(), this.today(), this.asset(setup)) : null;
   }
 
-  saveSetup(body: unknown) {
+  /** `createHome`: record a mortgage's home from the setup when it has no asset yet. */
+  saveSetup(body: unknown, { createHome = true } = {}) {
     const setup = parseSetup(body);
     const start = setup.startingPoint;
     if (start) {
@@ -347,8 +423,14 @@ export class MortgageService {
     }
     this.build(setup); // throws a readable 400 if the schedule cannot be generated
     this.root.transaction(() => {
-      this.ensureLoan();
       this.store.saveSetup(setup);
+      // A mortgage is always on a home: record it the first time, from the setup.
+      if (createHome && this.loan.type === 'mortgage' && !this.root.assetForLoan(this.loan.id)) {
+        this.root.createAsset({
+          loanId: this.loan.id, name: 'Home', kind: 'home', originalValue: setup.originalHomeValue,
+          valueTrend: 'manual', trendRatePercent: null, acquiredDate: setup.openDate,
+        });
+      }
     });
     return this.state();
   }
@@ -356,13 +438,8 @@ export class MortgageService {
   saveSettings(body: unknown) {
     const b = (body ?? {}) as Record<string, unknown>;
     const categoryId = typeof b.categoryId === 'string' && b.categoryId ? b.categoryId : null;
-    this.ensureLoan();
     this.store.saveSettings({ ...this.store.getSettings(), categoryId });
     return this.store.getSettings();
-  }
-
-  categories(): Promise<CategoryGroup[]> {
-    return this.source.getCategories();
   }
 
   private async fetchAround(categoryId: string, due: ISODate, before: number, after: number) {
@@ -371,7 +448,7 @@ export class MortgageService {
 
   private categoryOrThrow(categoryId: unknown): string {
     const id = typeof categoryId === 'string' && categoryId ? categoryId : this.store.getSettings().categoryId;
-    if (!id) throw new HttpError(400, 'Pick the mortgage category first');
+    if (!id) throw new HttpError(400, `Pick the category for ${this.loan.nickname}'s payments first`);
     return id;
   }
 
@@ -402,8 +479,8 @@ export class MortgageService {
     if (!transactionId) throw new HttpError(400, 'transactionId is required');
 
     const setup = this.requireSetup();
-    const row = this.tracked(this.row(this.build(setup), payment));
-    if (row.skipped) throw new HttpError(409, `Payment ${payment} is marked as skipped. Undo the skip first.`);
+    const scheduled = this.tracked(this.row(this.build(setup), payment));
+    if (scheduled.skipped) throw new HttpError(409, `Payment ${payment} is marked as skipped. Undo the skip first.`);
     const existing = this.store.getMonth(payment);
     if (existing?.status === 'paid') throw new HttpError(409, `Payment ${payment} is already reconciled. Undo it first.`);
     const usedBy = this.store.monthForTransaction(transactionId);
@@ -412,9 +489,11 @@ export class MortgageService {
     }
 
     const cat = this.categoryOrThrow(b.categoryId);
-    const txn = (await this.fetchAround(cat, row.dueDate, WIDE_WINDOW, WIDE_WINDOW)).find((t) => t.id === transactionId);
-    if (!txn) throw new HttpError(404, 'That transaction was not found in the mortgage category near this due date');
+    const txn = (await this.fetchAround(cat, scheduled.dueDate, WIDE_WINDOW, WIDE_WINDOW)).find((t) => t.id === transactionId);
+    if (!txn) throw new HttpError(404, "That transaction was not found in this loan's category near this due date");
     if (txn.amount >= 0) throw new HttpError(400, 'That transaction is a deposit, not a payment');
+    // Daily-interest loans accrue up to the day the payment really left the bank.
+    const row = setup.interestMethod === 'daily' ? this.row(this.build(setup, [payment, txn.date]), payment) : scheduled;
 
     const cmp = compareToSchedule(row, txn.amount);
     // Re-matching a flagged month to a different transaction starts it over.
@@ -439,7 +518,7 @@ export class MortgageService {
       scheduled: cmp.scheduled,
       actual: cmp.actual,
       difference: cmp.difference,
-      suggestions: cmp.matches ? [] : suggestionsFor(cmp.difference),
+      suggestions: cmp.matches ? [] : suggestionsFor(cmp.difference, modulesOf(setup)),
     };
   }
 
@@ -604,36 +683,13 @@ export class MortgageService {
     return this.state();
   }
 
-  // --- home value estimates ---------------------------------------------------------
-
-  addHomeValue(body: unknown) {
-    const b = bodyOf(body);
-    const value = { date: dateField(b, 'date'), value: amountField(b, 'value'), source: textField(b, 'source', 100) || 'Estimate' };
-    this.root.transaction(() => {
-      this.ensureLoan();
-      const asset =
-        this.root.assetForLoan(this.loanId) ??
-        this.root.createAsset({
-          loanId: this.loanId, name: 'Home', kind: 'home', originalValue: this.store.getSetup()?.originalHomeValue ?? 0,
-          valueTrend: 'manual', trendRatePercent: null, acquiredDate: null,
-        });
-      this.root.addAssetValue(asset.id, value);
-    });
-    return this.state();
-  }
-
-  deleteHomeValue(id: number) {
-    const asset = this.root.assetForLoan(this.loanId);
-    if (!asset || !this.root.deleteAssetValue(asset.id, id)) throw new HttpError(404, 'That home value is not on file');
-    return this.state();
-  }
-
   // --- escrow ---------------------------------------------------------------------
 
   addEscrowEntry(body: unknown) {
     const b = bodyOf(body);
     if (!isEscrowKind(b.kind)) throw new HttpError(400, 'Unknown escrow entry kind');
-    this.ensureLoan();
+    const setup = this.store.getSetup();
+    if (setup && !modulesOf(setup).escrow) throw new HttpError(409, 'Escrow is turned off for this loan');
     this.store.addEscrowEntry({ date: dateField(b, 'date'), kind: b.kind, amount: amountField(b, 'amount'), note: textField(b, 'note', 200) });
     return this.state();
   }
@@ -646,8 +702,268 @@ export class MortgageService {
   // --- loan details ------------------------------------------------------------------
 
   saveDetails(body: unknown) {
-    this.ensureLoan();
     this.store.saveDetails(parseDetails(body));
     return this.state();
+  }
+}
+
+/** One row of the loan list: enough for the picker and the sidebar. */
+export interface LoanListItem {
+  loan: LoanRecord;
+  configured: boolean;
+  asset: Pick<AssetRecord, 'id' | 'name' | 'kind'> | null;
+  /** Balance + deferred + past due. Null until the loan is set up. */
+  owed: Cents | null;
+  /** The asset's current value minus what's owed. Null without an asset or setup. */
+  equity: Cents | null;
+  assetValue: Cents | null;
+  nextPayment: { payment: number; dueDate: ISODate; total: Cents } | null;
+  /** Set when the schedule can't be built (an invalid saved setup). */
+  error: string | null;
+}
+
+const MAX_NICKNAME = 60;
+
+function nicknameField(b: Record<string, unknown>): string {
+  const v = textField(b, 'nickname', MAX_NICKNAME);
+  if (!v) throw new HttpError(400, 'Give the loan a nickname');
+  return v;
+}
+
+function loanTypeField(v: unknown): LoanType {
+  if (!LOAN_TYPES.includes(v as LoanType)) throw new HttpError(400, 'type must be mortgage, auto or personal');
+  return v as LoanType;
+}
+
+/** Coerce untrusted JSON into an asset. `loanId` is handled by the caller. */
+export function parseAsset(body: unknown, current?: AssetInput): Omit<AssetInput, 'loanId'> {
+  const b = bodyOf(body);
+  const merged = { ...current, ...b } as Record<string, unknown>;
+  const name = textField(merged, 'name', 80);
+  if (!name) throw new HttpError(400, 'Give the asset a name');
+  if (!ASSET_KINDS.includes(merged.kind as AssetKind)) throw new HttpError(400, 'kind must be home, vehicle or other');
+  const original = merged.originalValue;
+  if (!Number.isInteger(original) || (original as number) < 0 || (original as number) > MAX_AMOUNT) {
+    throw new HttpError(400, 'originalValue must be zero or more, in cents');
+  }
+  const trend = (merged.valueTrend ?? 'manual') as ValueTrend;
+  if (!VALUE_TRENDS.includes(trend)) throw new HttpError(400, 'valueTrend must be appreciating, depreciating or manual');
+  const rate = merged.trendRatePercent ?? null;
+  if (rate !== null && !(typeof rate === 'number' && rate >= 0 && rate <= 100)) {
+    throw new HttpError(400, 'trendRatePercent must be 0 to 100, or null');
+  }
+  const acquired = merged.acquiredDate ?? null;
+  if (acquired !== null && !isValidISODate(acquired)) throw new HttpError(400, 'acquiredDate must be a date like 2026-11-01, or null');
+  return {
+    name,
+    kind: merged.kind as AssetKind,
+    originalValue: original as Cents,
+    valueTrend: trend,
+    trendRatePercent: trend === 'manual' ? null : (rate as number | null),
+    acquiredDate: acquired as ISODate | null,
+  };
+}
+
+/**
+ * The tracker as a whole: the list of loans, assets and their values, and
+ * the read-only summaries. Per-loan work is done by `LoanService`.
+ */
+export class TrackerService {
+  constructor(
+    private readonly store: Store,
+    private readonly source: BudgetSource,
+    private readonly today: () => ISODate,
+  ) {}
+
+  sourceStatus(): SourceStatus {
+    return this.source.status();
+  }
+
+  /** Today, as the schedules see it. */
+  asOf(): ISODate {
+    return this.today();
+  }
+
+  categories(): Promise<CategoryGroup[]> {
+    return this.source.getCategories();
+  }
+
+  // --- loans --------------------------------------------------------------------------
+
+  /** The loan with this id, or a 404. */
+  loan(id: number): LoanService {
+    const loan = this.store.getLoan(id);
+    if (!loan) throw new HttpError(404, `There is no loan ${id}`);
+    return new LoanService(this.store, this.source, this.today, loan);
+  }
+
+  loans(): LoanListItem[] {
+    return this.store.listLoans().map((loan) => {
+      const svc = new LoanService(this.store, this.source, this.today, loan);
+      const asset = this.store.assetForLoan(loan.id);
+      const item: LoanListItem = {
+        loan,
+        configured: false,
+        asset: asset ? { id: asset.id, name: asset.name, kind: asset.kind } : null,
+        owed: null,
+        equity: null,
+        assetValue: null,
+        nextPayment: null,
+        error: null,
+      };
+      try {
+        const s = svc.summary();
+        if (!s) return item;
+        return {
+          ...item,
+          configured: true,
+          owed: s.owed,
+          equity: s.asset?.equity ?? null,
+          assetValue: s.asset?.value ?? null,
+          nextPayment: s.nextPayment ? { payment: s.nextPayment.payment, dueDate: s.nextPayment.dueDate, total: s.nextPayment.total } : null,
+        };
+      } catch (e) {
+        return { ...item, configured: true, error: (e as Error).message };
+      }
+    });
+  }
+
+  /**
+   * Create a loan: `{ nickname, type, setup?, asset? }`. A mortgage gets a
+   * home asset from its setup unless `asset` says otherwise; `asset: null`
+   * means none.
+   */
+  createLoan(body: unknown): { loan: LoanRecord; state: StateView } {
+    const b = bodyOf(body);
+    const nickname = nicknameField(b);
+    const type = loanTypeField(b.type);
+    const setup = b.setup === undefined || b.setup === null ? null : parseSetup(b.setup);
+    const asset = b.asset === undefined || b.asset === null ? null : parseAsset(b.asset);
+    const loan = this.store.transaction(() => {
+      const created = this.store.createLoan({ nickname, type });
+      if (asset) this.store.createAsset({ ...asset, loanId: created.id });
+      if (setup) {
+        const svc = new LoanService(this.store, this.source, this.today, created);
+        // Builds the schedule first, so a setup that can't be scheduled rolls everything back.
+        svc.saveSetup(setup, { createHome: b.asset !== null });
+      }
+      if (typeof b.categoryId === 'string' && b.categoryId) this.store.loan(created.id).saveSettings({ categoryId: b.categoryId });
+      return created;
+    });
+    return { loan, state: this.loan(loan.id).state() };
+  }
+
+  /** `{ nickname?, type?, archived? }` */
+  updateLoan(id: number, body: unknown): LoanRecord {
+    const b = bodyOf(body);
+    this.loan(id);
+    const patch: Partial<Pick<LoanRecord, 'nickname' | 'type' | 'archived'>> = {};
+    if (b.nickname !== undefined) patch.nickname = nicknameField(b);
+    if (b.type !== undefined) patch.type = loanTypeField(b.type);
+    if (b.archived !== undefined) {
+      if (typeof b.archived !== 'boolean') throw new HttpError(400, 'archived must be true or false');
+      patch.archived = b.archived;
+    }
+    return this.store.updateLoan(id, patch)!;
+  }
+
+  setArchived(id: number, archived: boolean): LoanRecord {
+    this.loan(id);
+    return this.store.updateLoan(id, { archived })!;
+  }
+
+  /**
+   * Delete a loan and everything recorded for it. Its asset (and the asset's
+   * value history) goes too, unless `keepAsset`, which keeps it unlinked.
+   * `confirm` has to be the loan's nickname, so a stray request can't do it.
+   */
+  deleteLoan(id: number, confirm: unknown, keepAsset: boolean) {
+    const loan = this.loan(id).loan;
+    if (confirm !== loan.nickname) {
+      throw new HttpError(400, `To delete "${loan.nickname}", pass confirm with its exact nickname`);
+    }
+    this.store.transaction(() => {
+      const asset = this.store.assetForLoan(id);
+      if (asset && !keepAsset) this.store.deleteAsset(asset.id);
+      this.store.deleteLoan(id);
+    });
+    return { deleted: id };
+  }
+
+  // --- assets ----------------------------------------------------------------------------
+
+  assets(): AssetRecord[] {
+    return this.store.listAssets();
+  }
+
+  private assetOr404(id: number): AssetRecord {
+    const asset = this.store.getAsset(id);
+    if (!asset) throw new HttpError(404, `There is no asset ${id}`);
+    return asset;
+  }
+
+  private loanIdField(v: unknown, assetId: number | null): number | null {
+    if (v === null || v === undefined) return null;
+    if (!Number.isInteger(v)) throw new HttpError(400, 'loanId must be a loan id, or null');
+    this.loan(v as number);
+    const linked = this.store.assetForLoan(v as number);
+    if (linked && linked.id !== assetId) throw new HttpError(409, `Loan ${String(v)} already has an asset (${linked.name})`);
+    return v as number;
+  }
+
+  createAsset(body: unknown): AssetRecord {
+    const b = bodyOf(body);
+    const loanId = this.loanIdField(b.loanId, null);
+    return this.store.createAsset({ ...parseAsset(b), loanId });
+  }
+
+  updateAsset(id: number, body: unknown): AssetRecord {
+    const current = this.assetOr404(id);
+    const b = bodyOf(body);
+    const loanId = b.loanId === undefined ? current.loanId : this.loanIdField(b.loanId, id);
+    return this.store.updateAsset(id, { ...parseAsset(b, current), loanId })!;
+  }
+
+  deleteAsset(id: number) {
+    this.assetOr404(id);
+    this.store.deleteAsset(id);
+    return { deleted: id };
+  }
+
+  addAssetValue(assetId: number, body: unknown): AssetRecord {
+    this.assetOr404(assetId);
+    const b = bodyOf(body);
+    this.store.addAssetValue(assetId, {
+      date: dateField(b, 'date'),
+      value: amountField(b, 'value'),
+      source: textField(b, 'source', 100) || 'Estimate',
+    });
+    return this.store.getAsset(assetId)!;
+  }
+
+  deleteAssetValue(assetId: number, valueId: number): AssetRecord {
+    this.assetOr404(assetId);
+    if (!this.store.deleteAssetValue(assetId, valueId)) throw new HttpError(404, 'That value is not on file');
+    return this.store.getAsset(assetId)!;
+  }
+
+  // --- read-only summaries ------------------------------------------------------------------
+
+  /** Every active loan that is set up. Archived loans are left out. */
+  summaries(): { loan: LoanRecord; summary: LoanSummary }[] {
+    return this.store
+      .listLoans()
+      .filter((l) => !l.archived)
+      .flatMap((loan) => {
+        const summary = new LoanService(this.store, this.source, this.today, loan).summary();
+        return summary ? [{ loan, summary }] : [];
+      });
+  }
+
+  summaryFor(id: number): { loan: LoanRecord; summary: LoanSummary } {
+    const svc = this.loan(id);
+    const summary = svc.summary();
+    if (!summary) throw new HttpError(409, `Loan ${id} has not been set up yet`);
+    return { loan: svc.loan, summary };
   }
 }

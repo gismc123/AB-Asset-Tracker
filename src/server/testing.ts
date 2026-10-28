@@ -18,7 +18,27 @@ export const SAMPLE_SETUP: LoanSetup = {
   extraPrincipal: 0,
 };
 
+/** Made-up sample car loan: 60 months, no PMI or escrow. Not real numbers. */
+export const AUTO_SETUP: LoanSetup = {
+  originalAmount: 3_000_000,
+  annualRatePercent: 6.9,
+  termYears: 5,
+  termMonths: 60,
+  openDate: '2025-03-10',
+  firstPaymentDate: '2025-04-10',
+  paymentDay: 10,
+  piPaymentOverride: null,
+  originalHomeValue: 0,
+  pmiMonthly: 0,
+  pmiStartDate: null,
+  pmiRemovalRule: 'auto78Scheduled',
+  escrowMonthly: 0,
+  extraPrincipal: 0,
+  modules: { pmi: false, escrow: false },
+};
+
 export const MORTGAGE_CATEGORY = 'cat-mortgage';
+export const CAR_CATEGORY = 'cat-car';
 
 /** In-memory stand-in for Actual. */
 export class FakeSource implements BudgetSource {
@@ -38,6 +58,7 @@ export class FakeSource implements BudgetSource {
           { id: 'cat-utilities', name: 'Utilities' },
         ],
       },
+      { id: 'grp-transport', name: 'Transportation', categories: [{ id: CAR_CATEGORY, name: 'Car payment' }] },
     ];
   }
 

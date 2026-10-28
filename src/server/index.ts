@@ -5,7 +5,7 @@ import { createApp } from './app.js';
 import { actualTokenValidator } from './auth.js';
 import { ConfigError, loadConfig } from './config.js';
 import { Store } from './db.js';
-import { MortgageService } from './service.js';
+import { TrackerService } from './service.js';
 
 function main() {
   let config;
@@ -20,9 +20,11 @@ function main() {
   }
   for (const w of config.warnings) console.warn(`[mortgage] ${w}`);
 
-  const store = new Store(path.join(config.dataDir, 'mortgage.sqlite'));
+  const store = new Store(path.join(config.dataDir, 'mortgage.sqlite'), {
+    onBackup: (file) => console.log(`[mortgage] upgrading the database; a copy of the old one is at ${file}`),
+  });
   const source = new ActualApiSource({ ...config.actual, dataDir: config.dataDir });
-  const service = new MortgageService(store, source, () => todayISO());
+  const service = new TrackerService(store, source, () => todayISO());
   const app = createApp({
     service,
     validateToken: actualTokenValidator(config.actual.serverURL),

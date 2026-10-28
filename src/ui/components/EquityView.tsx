@@ -17,6 +17,7 @@ const SOURCES = ['Appraisal', 'Tax assessment', 'Online estimate', 'Broker price
 export function EquityView({ state, client, onState }: Props) {
   const a = state.analysis!;
   const e = a.equity;
+  if (!e) return null;
   const pmiActive = state.summary?.pmi.active ?? false;
 
   return (
@@ -131,7 +132,7 @@ function milestoneText(p: number): string {
 }
 
 function EquityParts({ state }: { state: StateView }) {
-  const e = state.analysis!.equity;
+  const e = state.analysis!.equity!;
   const parts = [
     { label: 'Down payment', note: 'Original value minus the amount borrowed', value: e.parts.startingEquity },
     { label: 'Principal paid', note: 'From regular payments', value: e.parts.principalPaid },
@@ -176,7 +177,7 @@ function HomeValues({ state, client, onState }: Props) {
   const [d, setD] = useState({ date: state.today, value: '', source: 'Online estimate' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const values = [...state.homeValues].reverse();
+  const values = [...(state.asset?.values ?? [])].reverse();
 
   const run = async (fn: () => Promise<StateView>) => {
     setBusy(true);

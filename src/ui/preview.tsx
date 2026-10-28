@@ -91,7 +91,9 @@ function mockClient(empty: boolean): MortgageClient {
     const base = {
       setup, settings: { categoryId }, source: { connected: true, lastSync: null, error: null }, today: TODAY,
       adjustments: adjustments.map((a, i) => ({ id: i + 1, adjustment: a.adj, sourcePayment: a.source, createdAt: '' })),
-      homeValues: [...homeValues].sort((a, b) => a.date.localeCompare(b.date)), details,
+      details,
+      loan: { id: 1, nickname: 'Mortgage', type: 'mortgage' as const, createdAt: '', archived: false },
+      asset: { id: 1, loanId: 1, name: 'Home', kind: 'home' as const, originalValue: SAMPLE.originalHomeValue, valueTrend: 'manual' as const, trendRatePercent: null, acquiredDate: null, values: [...homeValues].sort((a, b) => a.date.localeCompare(b.date)) },
     };
     if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
     const s = build();
