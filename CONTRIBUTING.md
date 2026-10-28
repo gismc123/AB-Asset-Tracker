@@ -55,7 +55,9 @@ with a throwaway budget, set `COMPOSE_FILE` for your setup, then run
    CI runs the same checks, and builds both Docker images, on every pull
    request.
 4. If the change is visible, include a screenshot from the preview page.
-5. Update the README when behavior, settings or the API change.
+5. Update the docs when behavior, settings or the API change: the README
+   for installing and using it, and the pages in `docs/` (FAQ,
+   troubleshooting, the summary endpoint, development and the API).
 
 Write user-facing text in plain, short sentences. Avoid jargon where an
 everyday word works, and say what the user should do next when something

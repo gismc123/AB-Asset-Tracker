@@ -27,13 +27,17 @@ affiliated with or endorsed by the Actual Budget project.
 - [What it does](#what-it-does)
 - [Using it](#using-it)
 - [Configuration reference](#configuration-reference)
-- [FAQ](#faq)
-- [Troubleshooting](#troubleshooting)
-- [Read-only summary endpoint](#read-only-summary-endpoint)
 - [How it works](#how-it-works)
-- [Compatibility](#compatibility)
-- [Development](#development)
 - [Support the project](#support-the-project)
+
+More documentation:
+
+- [FAQ](docs/FAQ.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Read-only summary endpoint](docs/SUMMARY_ENDPOINT.md)
+- [Compatibility](docs/COMPATIBILITY.md)
+- [Development](docs/DEVELOPMENT.md)
+- [Known limitations](docs/KNOWN_LIMITATIONS.md) and the [roadmap](docs/ROADMAP.md)
 
 ---
 
@@ -166,7 +170,7 @@ docker compose logs asset-tracker-backend | grep asset-tracker
 `[asset-tracker] connected to Actual and loaded the budget`.
 
 If it doesn't, the log line above it says what's wrong; see
-[Troubleshooting](#troubleshooting).
+[Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ### Step 8: Add your first loan
 
@@ -284,6 +288,8 @@ Good to know:
 - **Another reverse proxy** works the same way: point it at
   `http://<this-machine>:5007` with `PROXY_TLS=off`, keep WebSocket support
   on, and let it pass `X-Forwarded-Proto` along.
+
+---
 
 ## Update
 
@@ -805,7 +811,7 @@ invalid. After changing `.env`, run `docker compose up -d`.
 | `ACTUAL_DATA_DIR` | no | `./actual-data` | Setup B only: where Actual stores its data. |
 | `ACTUAL_IMAGE` | no | `docker.io/actualbudget/actual-server:latest` | Setup B only: which Actual image to run. Pin a tag to update on your own schedule. |
 | `BACKEND_PORT` | no | `3100` | Port the backend listens on inside the Docker network. |
-| `SUMMARY_TOKEN` | no | empty (off) | Turns on the [read-only summary endpoint](#read-only-summary-endpoint). |
+| `SUMMARY_TOKEN` | no | empty (off) | Turns on the [read-only summary endpoint](docs/SUMMARY_ENDPOINT.md). |
 | `TZ` | no | `Etc/UTC` | Your timezone as a tz database name, used to decide what "today" is. |
 
 The tracker's own data lives in `./data`:
@@ -849,368 +855,6 @@ The backend has to trust Actual's certificate to read your budget:
 
 ---
 
-## FAQ
-
-### General
-
-**Does this change my Actual budget?**
-No. The tracker only reads categories and transactions. It never creates,
-changes or deletes anything in your budget, and Actual's own files and
-container aren't modified.
-
-**Is this an official Actual Budget project?**
-No. It's a community add-on that works with Actual. Please report problems
-with it here, not to the Actual project.
-
-**Do I have to change any Actual settings?**
-No. You just open Actual through the add-on's port (5007) instead of
-Actual's own (5006).
-
-**Can I still use Actual directly on port 5006?**
-Yes, Actual keeps working there, just without the Loans section. Only the
-proxy port shows it.
-
-**Does it work in Actual's phone layout or the desktop app?**
-No. It needs Actual's desktop web layout in a browser (the sidebar is where
-it lives). On a narrow window or a phone, Actual switches to its mobile
-layout and Loans is hidden. The Actual desktop app doesn't load pages
-through the proxy, so it doesn't show Loans either.
-
-**Does it work on a Raspberry Pi?**
-Yes. It's developed and tested on one. The first build takes a few minutes.
-
-**Can I track more than one budget?**
-One install reads one budget (one Sync ID). For a second budget, clone the
-project into a second folder, give it its own `.env` with a different
-`PROXY_PORT`, and start it there.
-
-**Which countries does it work for?**
-Amounts are shown in dollars with two decimals, and the PMI rules are U.S.
-rules. The loan math itself (amortization, interest, fees, equity) works for
-any fixed-rate loan with monthly payments.
-
-**How do I support the project?**
-Star it on GitHub, report bugs, or help fund it on
-[Patreon](https://patreon.com/IvanS1123). See
-[Support the project](#support-the-project).
-
-### Data, privacy and backups
-
-**Where is my loan data stored?**
-In `data/` inside this folder, in a SQLite file, `asset-tracker.sqlite`. Nothing is stored in Actual.
-
-**Is any of my data sent anywhere?**
-No. The tracker talks only to your own Actual server. It has no analytics
-and makes no other outside connections.
-
-**Who can see my loans?**
-Anyone who can log in to your Actual server through the proxy port. The
-tracker checks every request against Actual's own login. With Actual's
-multi-user (OpenID) login, that means every user sees every loan.
-
-**How do I back up and restore?**
-Click **Backup** next to the loan tabs, then *Download backup*. To restore,
-pick the file under *Restore* on the same screen. See
-[Backing up and restoring](#backing-up-and-restoring), which also covers the
-command line. Back up Actual separately (*Settings → Export data*).
-
-You can also copy the whole `data/` folder. Stop the backend first so the
-database is quiet:
-
-```sh
-docker compose stop asset-tracker-backend
-cp -r data /somewhere/safe/tracker-backup
-docker compose start asset-tracker-backend
-```
-
-To restore that copy, stop the backend, replace `data/` with it, and start
-it again.
-
-**What are the `.backup-before-restore-...` files in `data/`?**
-The data a restore replaced, saved just before it. To undo a restore, stop
-the backend, move your database (`asset-tracker.sqlite`, plus
-any `-wal` and `-shm` files beside it) out of `data/`, copy the `.backup-before-restore-...` file in under the
-database's name, and start the backend again. Delete these files once
-you're happy.
-
-**What are the `.backup-v...` files in `data/`?**
-Automatic copies made before an update changed the database layout. Keep
-them until you've checked the update went well, then delete them if you
-like.
-
-**Can I delete `data/actual-cache/`?**
-Yes. It's the tracker's downloaded copy of your budget, fetched again on the
-next start. Your loan data isn't in it.
-
-### Loans
-
-**Which kinds of loans can I track?**
-Mortgages, auto loans and personal loans. Any other fixed-rate loan with
-monthly payments (student loan, boat or RV loan, equipment loan) works as a
-*personal loan*; add an asset to it if it paid for something with a resale
-value.
-
-**I've been paying on my loan for years. Do I have to enter every payment?**
-No. Enter the original terms, tick *Already paying on this loan?*, and enter
-your last payment date and balance from a recent statement. See
-[A loan that's already under way](#a-loan-thats-already-under-way).
-
-**My statement's payment is a cent different from the calculated one.**
-Type the statement's exact principal-and-interest amount into the payment
-field under Setup. For a one-off cent of difference in the split, use the
-penny offset on that month.
-
-**How do I know if my loan uses daily interest?**
-Your loan agreement says "simple interest" or describes interest accruing
-daily. Many car and personal loans do; most mortgages don't. If you're not
-sure, start with monthly; if your statements' interest changes when you pay
-early or late, switch to daily.
-
-**I pay every two weeks.**
-Only monthly schedules are supported. If your lender collects biweekly but
-applies it monthly, reconcile the month against one combined transaction; a
-true biweekly schedule isn't modeled.
-
-**My rate changes (an ARM) or I refinanced.**
-Rate changes can't be modeled. After a refinance, archive the old loan and
-add the new one (use *Already paying on this loan?* if you set it up late).
-
-**I made an extra principal payment as its own transaction.**
-Match the regular payment as usual, then record the extra as *extra
-principal* with that month or the next one. On a daily-interest loan that
-charges a few days more interest than your lender does; see
-[Known limitations](docs/KNOWN_LIMITATIONS.md).
-
-**My bank splits the payment into principal, interest and escrow categories.**
-Keep the whole loan payment in one category in Actual (one transaction, or a
-split whose loan lines all use the same category). The tracker only looks at
-the category you pick, so a payment spread over several categories won't
-match.
-
-**Why does my car still show its purchase price?**
-Equity uses the latest value you entered. Add one on the Vehicle screen from
-a pricing guide now and then. The *projected today* figure is only an
-estimate based on the yearly drop you set.
-
-**Can a home equity loan and a mortgage share the same home?**
-Not yet. Each asset belongs to one loan, so combined equity across two
-loans on the same home isn't calculated. Track the second loan as a
-personal loan without an asset.
-
-**What's the difference between archive and delete?**
-Archive hides a loan (paid off, sold, refinanced) and keeps its history; you
-can unarchive it any time. Delete removes the loan and everything recorded
-for it, and can't be undone.
-
-### Setup and networking
-
-**Can I use a port other than 5007?**
-Yes. Set `PROXY_PORT` in `.env` and run `docker compose up -d`.
-
-**Actual runs on another machine.**
-Set `ACTUAL_SERVER_URL` and `ACTUAL_UPSTREAM` to that machine's address, e.g.
-`https://192.0.2.10:5006`, and use setup A. The add-on can run anywhere that
-can reach Actual.
-
-**Can I put it behind my own reverse proxy (Caddy, Traefik, Nginx Proxy Manager)?**
-Yes. Point your reverse proxy at port 5007 instead of at Actual. Either set
-`PROXY_TLS=off` and use `http://<this-machine>:5007`, or keep HTTPS and tell
-the reverse proxy not to verify the add-on's self-signed certificate. Keep
-WebSocket support on, as for Actual. See
-[Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy).
-
-**I use a Cloudflare Tunnel, and Cloudflare manages the certificate.**
-Point the tunnel at the add-on's port instead of Actual's, and set
-`PROXY_TLS=off`. Step by step:
-[Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy).
-
-**Can I reach it remotely (VPN, Tailscale, Cloudflare Tunnel)?**
-Yes, the same way you reach Actual: use the proxy port (5007) instead of
-Actual's. For a tunnel or anything else that handles HTTPS for you, see
-[Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy).
-
-**I see a certificate warning every time.**
-That's the self-signed certificate. Accept it once per browser, or
-[use a real certificate](#use-a-real-certificate).
-
-### Updates
-
-**How do I update?**
-`git pull` then `docker compose up -d --remove-orphans`. See [Update](#update).
-
-**Will updating Actual break it?**
-Normally not: Actual runs from its own unchanged image. The sidebar item
-depends on Actual's page layout, so after a big Actual release, reload the
-page once and check that Loans is still there. If it isn't, see
-[Troubleshooting](#troubleshooting).
-
-**Does an update ever touch my data?**
-Only the tracker's own database, and only when an update changes its layout.
-A copy of the old database is always saved first.
-
----
-
-## Troubleshooting
-
-Work down the list. None of these steps touch your budget.
-
-**`Bind for 0.0.0.0:5007 failed: port is already allocated`**
-Something else is already using port 5007, often the add-on's own
-containers from the other setup (A or B).
-1. Make sure `.env` has the right `COMPOSE_FILE` for your setup, then run
-   `docker compose up -d --remove-orphans`. That removes the leftover
-   containers.
-2. Still failing? See what holds the port:
-   `docker ps --format '{{.Names}}\t{{.Ports}}' | grep 5007`. Stop that
-   container, or set a different `PROXY_PORT` in `.env`.
-
-**A second Actual container appeared (`...-actual-1`).**
-`docker compose` ran setup B's file while you use setup A. Set
-`COMPOSE_FILE=compose.existing-actual.yml` in `.env` and run
-`docker compose up -d --remove-orphans`; the extra container is removed.
-Your real Actual isn't affected. If an empty `actual-data/` folder was
-created, you can delete it.
-
-**The backend keeps restarting.**
-Run `docker compose logs asset-tracker-backend | grep asset-tracker`.
-- *"Missing required setting(s): ..."*: fill in the named settings in `.env`.
-- *"... is not a known timezone"* or *"PORT must be ..."*: fix that setting.
-- *"Authentication failed"*: check `ACTUAL_PASSWORD` and `ACTUAL_SERVER_URL`.
-- *Certificate errors* (`self-signed certificate`, `unable to verify`): see
-  [Actual uses a self-signed certificate](#actual-uses-a-self-signed-certificate).
-- *"out-of-sync" / migration / version errors*: your Actual is newer than
-  the API package; see [Compatibility](#compatibility).
-
-**Loans is missing from the sidebar.**
-1. Make sure you're on the proxy port (`:5007`), not Actual's (`:5006`).
-   Through a Cloudflare Tunnel or reverse proxy, check that it points at
-   port 5007.
-2. Hard-reload the page (Ctrl+Shift+R / Cmd+Shift+R). Actual caches its page,
-   and the first load after an update can be the old copy.
-3. Make the window wider: Actual's mobile layout has no sidebar.
-4. Open the browser console (F12 → Console) and look for `[asset-tracker]`.
-   - *"Could not find a sidebar link to attach to"*: Actual changed its page
-     layout. Actual itself is fine. Please
-     [open an issue](https://github.com/gismc123/AB-Asset-Tracker/issues) with
-     your Actual version and that line.
-   - No `[asset-tracker]` lines at all: the script wasn't added. Check that
-     the proxy is running (`docker compose ps`) and that
-     `https://<this-machine>:5007/asset-tracker-addon/inject.js` loads.
-
-**"Log in to Actual to see your loans."**
-Log out of Actual and back in through the proxy port. The tracker uses the
-same login.
-
-**"Can't read from Actual right now"** on the loan screens.
-The backend lost its connection to Actual. Check the backend log (see
-above). Deleting `data/actual-cache/` and restarting the backend forces a
-fresh download of the budget; your loan data isn't affected.
-
-**Behind Cloudflare: a `502 Bad Gateway` or *Bad gateway* error page.**
-`cloudflared` can't reach the add-on.
-- Check the tunnel's service type matches `PROXY_TLS`: `HTTP` with
-  `PROXY_TLS=off`, `HTTPS` with **No TLS Verify** with `PROXY_TLS=on`.
-  An `HTTPS` service with `PROXY_TLS=off` (or the other way round) fails.
-- With `PROXY_PORT=127.0.0.1:5007`, `cloudflared` has to run on this same
-  machine and use `localhost`. If it runs in Docker without host
-  networking, or on another machine, set `PROXY_PORT=5007` and use this
-  machine's network address.
-
-**Actual says it needs HTTPS, or the page stays blank, on `http://<this-machine>:5007`.**
-With `PROXY_TLS=off` the add-on serves plain HTTP for a tunnel or reverse
-proxy, and Actual doesn't run on plain `http://` addresses. Open it through
-your Cloudflare name instead, or set `PROXY_TLS=on` to use it at home too.
-
-**Actual shows a 502 page through the proxy.**
-Actual is down or still starting. Check `docker ps` and Actual's own logs.
-Going straight to Actual's port tells you whether the problem is Actual or
-the proxy.
-
-**The numbers don't match my statement.**
-Compare one month on the Schedule screen. A one-cent split difference is
-what the payment override and penny offset are for. Reconciled months are
-locked to what you matched, and daily-interest loans use the date your bank
-paid. Check the interest method, the rate (the note rate, not the APR), and
-the first payment date.
-
----
-
-## Read-only summary endpoint
-
-For dashboards (a wall display, a home automation panel) there's one
-read-only JSON endpoint. It's **off** until you set `SUMMARY_TOKEN` in
-`.env` to a long random string (e.g. from `openssl rand -hex 24`) and run
-`docker compose up -d`. Send the token in the `Authorization` header:
-
-```sh
-curl -k -H "Authorization: Bearer <SUMMARY_TOKEN>" "https://<this-machine>:5007/asset-tracker-api/v1/summary"
-curl -k -H "Authorization: Bearer <SUMMARY_TOKEN>" "https://<this-machine>:5007/asset-tracker-api/v1/summary?loan=2"
-```
-
-Without `?loan`, you get every loan that is set up and not archived:
-
-```json
-{ "version": 2, "asOf": "2025-10-12", "loans": [ { "id": 1, "nickname": "Mortgage", "...": "..." } ] }
-```
-
-With `?loan=<id>`, you get that one loan. Example for the made-up car loan:
-
-```json
-{
-  "version": 2,
-  "id": 2,
-  "nickname": "Hatchback",
-  "type": "auto",
-  "asOf": "2025-10-12",
-  "paymentNumber": 6,
-  "totalPayments": 60,
-  "nextPayment": { "number": 7, "dueDate": "2025-10-10", "amount": 592.62, "daysUntil": -2 },
-  "balance": 27439.32,
-  "deferredBalance": 0,
-  "pastDue": 0,
-  "owed": 27439.32,
-  "scheduledBalance": 27012.69,
-  "percentPaid": 8.54,
-  "asset": {
-    "name": "Sample hatchback",
-    "kind": "vehicle",
-    "value": 32500,
-    "valueAsOf": "2025-09-15",
-    "valueSource": "Pricing guide",
-    "valueEntered": true,
-    "projectedValue": 32111.89
-  },
-  "equity": 5060.68,
-  "equityPercent": 15.57,
-  "payoff": { "amount": 27605.31, "source": "estimate", "asOf": "2025-10-12" },
-  "payoffDate": "2030-03-10",
-  "pmi": null
-}
-```
-
-- Money is in dollars, dates are `YYYY-MM-DD`.
-- `paymentNumber` is the last *reconciled* payment. `balance` is after that
-  payment; `scheduledBalance` is what the schedule expects by today.
-  `nextPayment.daysUntil` is negative when that payment's due date has
-  passed and it isn't reconciled yet.
-- `equity` is the asset's latest value minus `owed`. `asset` and `equity`
-  are `null` for a loan without an asset. `pmi` is `null` unless the loan
-  has PMI; for a mortgage it holds `active`, `monthly`, `dropDate`,
-  `paymentsUntilDrop`, `daysUntilDrop`, `requestRemovalDate`,
-  `automaticRemovalDate` and `removalRule`. With `removalRule`
-  `"untilRemoved"` and no removal recorded, `dropDate`, `paymentsUntilDrop`
-  and `daysUntilDrop` are `null`: PMI stays until it's removed.
-- Loan details (servicer, account numbers, notes) are never included.
-- The endpoint never changes anything, and its token can't be used for the
-  rest of the API. To change the token, edit `SUMMARY_TOKEN` and run
-  `docker compose up -d`.
-- The older `?token=<SUMMARY_TOKEN>` query form still works but is
-  **deprecated** (query strings end up in logs and browser history): those
-  responses carry a `Deprecation: true` header, and the backend logs a
-  warning once.
-
----
-
 ## How it works
 
 ```
@@ -1250,119 +894,6 @@ With `?loan=<id>`, you get that one loan. Example for the made-up car loan:
 
 ---
 
-## Compatibility
-
-| Component | Tested with |
-|---|---|
-| Actual server | `actualbudget/actual-server` **26.10.0** |
-| `@actual-app/api` | **26.10.0** (pinned in `package.json`) |
-| Node.js (backend image) | 22 (`node:22-bookworm-slim`) |
-| nginx (proxy image) | 1.27 (`nginx:1.27-alpine`) |
-| Browsers | Current Chrome, Firefox and Safari (desktop layout) |
-
-Keep `@actual-app/api` on the same version as your Actual server. If a newer
-Actual gives *"out-of-sync"* or version errors in the backend log, set
-`@actual-app/api` in `package.json` to your Actual's version (shown at the
-bottom of Actual's login screen), run `./scripts/npm.sh install`, then
-`docker compose up -d`.
-
----
-
-## Development
-
-The math lives in `src/engine`, has no dependencies, and is fully unit
-tested. All money is integer cents.
-
-```sh
-npm install && npm test        # with Node 22+
-npm run typecheck
-npm run build                  # dist/server (backend) + dist/ui (inject.js, preview)
-```
-
-No Node on the machine (e.g. a Raspberry Pi with only Docker)? Use the
-wrapper, which runs the same commands in the official Node image:
-
-```sh
-./scripts/npm.sh install
-./scripts/npm.sh test
-./scripts/npm.sh run build
-```
-
-**Preview the screens without Actual.** After a build, open
-`dist/ui/preview.html` in a browser. It runs the real components against an
-in-memory mock with three made-up loans and a mock sidebar. Add
-`?theme=dark`, `?empty` (first-run screen), `?privacy`, or `?loan=2`.
-
-**Tests use no real Actual server or data.** Backend tests run against an
-in-memory database and a fake Actual source (`src/server/testing.ts`). The
-migration tests load databases in the tracker's first schema
-(`test/fixtures`) and check the migrated loan matches its numbers exactly.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes, and
-[docs/DECISIONS.md](docs/DECISIONS.md),
-[docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) and
-[docs/ROADMAP.md](docs/ROADMAP.md) for the reasoning, the gaps, and what's
-planned.
-
-### Project layout
-
-```
-src/engine/      Amortization, interest, fees, skips, PMI, reconciliation, equity, assets, escrow, period totals (pure, tested)
-src/server/      Backend: config, read-only Actual adapter, SQLite store and migrations, services, HTTP API
-src/ui/          Loan screens (React), sidebar list, API client, styles, preview
-src/inject/      The one script the proxy injects into Actual's page
-proxy/           nginx image: TLS, pass-through, one-line injection
-test/fixtures/   Databases in the first schema, for the migration tests
-examples/        Made-up sample loans (cents)
-scripts/         UI build, Docker-only npm wrapper
-docs/            Screenshots, decisions, known limitations, publishing notes
-docker-compose.yml           Setup B: stock Actual + add-on
-compose.existing-actual.yml  Setup A: add-on in front of an Actual you already run
-compose.addon.yml            The two add-on services (used by both)
-```
-
-### API (for the UI)
-
-All under `/asset-tracker-api`, and all except `health` and `v1/summary`
-need the `x-actual-token` header of a logged-in Actual session. Money is in
-cents.
-
-| Method & path | Purpose |
-|---|---|
-| `GET /health` | Liveness, and whether Actual is connected (no error text; that's in the loan state) |
-| `GET /v1/summary[?loan=<id>]` | Read-only dashboard summary (own token, see above) |
-| `GET /categories` | Actual's category groups |
-| `GET /loans` | Every loan with what it owes, its equity and next payment |
-| `POST /loans` | `{ nickname, type, setup?, asset?, categoryId? }`: add a loan |
-| `PATCH /loans/:loanId` | `{ nickname?, type?, archived? }` |
-| `POST /loans/:loanId/archive`, `/unarchive` | Hide or show a loan |
-| `DELETE /loans/:loanId?confirm=<nickname>[&keepAsset=1]` | Delete a loan and its records (its asset too, unless `keepAsset`) |
-| `GET /loans/:loanId/state` | Setup, schedule with statuses, summary, equity, periods, escrow, asset, details |
-| `PUT /loans/:loanId/setup` | Save the loan setup |
-| `PUT /loans/:loanId/settings` | `{ categoryId }`: the loan's Actual category |
-| `GET /loans/:loanId/months/:n/candidates?categoryId=&wide=1` | Transactions near payment *n*'s due date |
-| `POST /loans/:loanId/months/:n/match` | `{ transactionId }` → paid, or flagged with suggestions |
-| `POST /loans/:loanId/months/:n/resolve` | `{ resolution: rounding\|escrow\|pmi\|extraPrincipal, standing? }` |
-| `POST /loans/:loanId/months/:n/unmatch` | Undo a match and the adjustments it created |
-| `PUT /loans/:loanId/months/:n/offset` | `{ amount }`, manual penny offset (±100) |
-| `POST /loans/:loanId/months/:n/skip` | `{ mode: catchUp\|capitalize\|defer }` |
-| `POST /loans/:loanId/months/:n/unskip` | Undo a skip |
-| `PUT /loans/:loanId/months/:n/catch-up` | `{ fromPayment, months }`: plan to pay back missed payment *n* |
-| `DELETE /loans/:loanId/months/:n/catch-up` | Remove that plan |
-| `PUT /loans/:loanId/pmi/removal` | `{ fromPayment }`: PMI stopped from this payment on (replaces an earlier record) |
-| `DELETE /loans/:loanId/pmi/removal` | Remove that record |
-| `POST /loans/:loanId/escrow/entries` | `{ date, kind, amount, note }`: an escrow bill or deposit |
-| `DELETE /loans/:loanId/escrow/entries/:id` | Remove an escrow entry |
-| `PUT /loans/:loanId/details` | `{ fields, custom }`: save loan details |
-| `GET /assets` | Every asset with its values |
-| `POST /assets` | `{ name, kind, originalValue, valueTrend?, trendRatePercent?, acquiredDate?, loanId? }` |
-| `PATCH /assets/:assetId` | Change any of those fields |
-| `DELETE /assets/:assetId` | Remove an asset and its values |
-| `POST /assets/:assetId/values` | `{ date, value, source }`: add a value |
-| `DELETE /assets/:assetId/values/:valueId` | Remove a value |
-| `GET /backup` | Everything in the tracker as a backup file (JSON attachment) |
-| `POST /restore?confirm=replace` | Body: a backup file. Replaces everything, after saving a copy of the database |
-
 ## Support the project
 
 AB Asset Tracker is free and open source, and it stays that way: nothing is
@@ -1377,6 +908,8 @@ helps:
   covers.
 
 Thank you!
+
+---
 
 ## License
 
