@@ -1,5 +1,8 @@
 # AB Asset Tracker
 
+> If this project is useful to you, you can help fund its development on
+> [Patreon](https://patreon.com/IvanS1123). Thank you!
+
 A **Loans** section for a stock [Actual Budget](https://actualbudget.org)
 server. It follows each of your loans end to end (mortgages, car loans,
 personal loans) and what they paid for: payment number, principal vs.
