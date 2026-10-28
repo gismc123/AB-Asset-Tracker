@@ -6,7 +6,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:ui",
@@ -29,11 +29,11 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@types/supertest": "^6.0.3",
-    "esbuild": "^0.25.5",
+    "esbuild": "^0.28.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "supertest": "^7.1.0",
     "typescript": "~5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^5.0.5"
   }
 }

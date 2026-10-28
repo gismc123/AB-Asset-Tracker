@@ -1,0 +1,41 @@
+# Typecheck, test and build on every push to main and every pull request,
+# then build both Docker images and check the proxy's nginx config.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the backend image
+        run: docker build -t ab-asset-tracker-backend:ci .
+      - name: Build the proxy image
+        run: docker build -t ab-asset-tracker-proxy:ci ./proxy
+      - name: Check the generated nginx config, with and without TLS
+        run: |
+          for tls in on off; do
+            docker run --rm -e PROXY_TLS=$tls -e ACTUAL_UPSTREAM=http://actual:5006 --add-host actual:127.0.0.1 \
+              --entrypoint sh ab-asset-tracker-proxy:ci \
+              -c 'mkdir -p /certs && /docker-entrypoint.d/40-asset-tracker-setup.sh && nginx -t'
+          done

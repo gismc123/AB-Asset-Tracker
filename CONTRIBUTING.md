@@ -29,7 +29,7 @@ shape before you spend time on it.
 
 ## Getting set up
 
-You need Node 22+ (or only Docker: `./scripts/npm.sh` runs every npm
+You need Node 22.12+ (or only Docker: `./scripts/npm.sh` runs every npm
 command inside the official Node image).
 
 ```sh
@@ -52,6 +52,8 @@ with a throwaway budget, set `COMPOSE_FILE` for your setup, then run
 2. Keep commits small and focused, with a message that says what changed
    and why.
 3. Run `npm test`, `npm run typecheck` and `npm run build` before you push.
+   CI runs the same checks, and builds both Docker images, on every pull
+   request.
 4. If the change is visible, include a screenshot from the preview page.
 5. Update the README when behavior, settings or the API change.
 
@@ -69,5 +71,5 @@ Please remove anything personal from logs and screenshots first.
 ## Security
 
 If you find a way to read loan data without an Actual login, or to make the
-tracker write to a budget, please don't open a public issue. Contact the
-maintainer privately through GitHub instead.
+tracker write to a budget, please don't open a public issue. See
+[SECURITY.md](SECURITY.md) for how to report it privately.
