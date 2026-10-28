@@ -36,38 +36,6 @@ front of Actual and only ever reads from your budget.
 - **Preview page** with made-up sample loans, for trying the screens without
   Actual.
 
-## Upgrading from AB Mortgage Tracker
-
-If you ran the earlier single-loan version from the same folder, first add
-one line to `.env` that says which setup you use:
-
-```ini
-COMPOSE_FILE=compose.existing-actual.yml   # or docker-compose.yml for the bundled setup
-```
-
-Then:
-
-```sh
-git pull
-docker compose up -d --remove-orphans
-```
-
-Your mortgage becomes loan 1 with all of its history. The database is
-upgraded in place, and a copy of the old one is saved next to it first.
-Things that changed:
-
-- The sidebar item is **Loans** (it was Mortgage).
-- URLs moved from `/mortgage-api` and `/mortgage-addon` to
-  `/asset-tracker-api` and `/asset-tracker-addon`, and every loan route is
-  now under `/loans/:loanId`.
-- The summary endpoint returns **version 2**: a list of loans, or one loan
-  with `?loan=<id>`. Send the token as `Authorization: Bearer <token>`; the
-  `?token=` form still works but is deprecated.
-- Containers are `asset-tracker-backend` and `asset-tracker-proxy`.
-- `TZ` now defaults to UTC. Set it in `.env` to your own timezone.
-- `COMPOSE_FILE` in `.env` picks the setup, so every command is plain
-  `docker compose ...`, and the add-on images are always built locally.
-
 ## Compatibility
 
 Tested with Actual server 26.10.0 and `@actual-app/api` 26.10.0.

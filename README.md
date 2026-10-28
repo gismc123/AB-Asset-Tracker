@@ -192,36 +192,6 @@ the tracker first saves a copy of the old database next to it, named
 **Updating Actual:** setup A, update Actual the way you always have; the
 add-on doesn't need anything. Setup B: `docker compose pull actual && docker compose up -d actual`.
 
-### Upgrading from "AB Mortgage Tracker"
-
-This project used to be the single-loan *AB Mortgage Tracker*. If you ran
-that version:
-
-1. Add the `COMPOSE_FILE` line for your setup to `.env` (step 3 above):
-   `COMPOSE_FILE=compose.existing-actual.yml` if you ran it in front of your
-   own Actual, or `COMPOSE_FILE=docker-compose.yml` for the bundled setup.
-2. Run the update:
-   ```sh
-   git pull
-   docker compose up -d --remove-orphans
-   ```
-   `--remove-orphans` stops the old `mortgage-backend` and `mortgage-proxy`
-   containers so the new proxy can take port 5007.
-
-Your mortgage becomes loan 1 (nickname *Mortgage*, which you can change)
-with every reconciled month, adjustment, home value, escrow entry and detail.
-The database stays at `data/mortgage.sqlite`, with a copy from before the
-upgrade saved next to it. The old URLs under `/mortgage-api` are gone (see
-the [summary endpoint](#read-only-summary-endpoint) for the new address).
-
-Want the folder to match the new name too? Stop, move, start:
-
-```sh
-docker compose down
-cd .. && mv <old-folder-name> ab-asset-tracker && cd ab-asset-tracker
-docker compose up -d
-```
-
 ---
 
 ## Uninstall
@@ -713,7 +683,7 @@ The tracker's own data lives in `./data`:
 
 | File | What it is |
 |---|---|
-| `asset-tracker.sqlite` | Loans, setup, reconciliation, assets. **Back this up.** (Installs from before the rename use `mortgage.sqlite`.) |
+| `asset-tracker.sqlite` | Loans, setup, reconciliation, assets. **Back this up.** |
 | `*.sqlite.backup-v<N>-<time>` | A copy made automatically before an update changed the database layout. Safe to delete once you're happy. |
 | `*.sqlite.backup-before-restore-<time>` | The data a restore replaced, saved just before it. Safe to delete once you're happy. |
 | `actual-cache/` | A local copy of the budget that the tracker downloads from Actual. Safe to delete; it's downloaded again. |
@@ -798,8 +768,7 @@ Star it on GitHub, report bugs, or help fund it on
 ### Data, privacy and backups
 
 **Where is my loan data stored?**
-In `data/` inside this folder, in a SQLite file (`asset-tracker.sqlite`, or
-`mortgage.sqlite` on older installs). Nothing is stored in Actual.
+In `data/` inside this folder, in a SQLite file, `asset-tracker.sqlite`. Nothing is stored in Actual.
 
 **Is any of my data sent anywhere?**
 No. The tracker talks only to your own Actual server. It has no analytics
@@ -829,9 +798,8 @@ it again.
 
 **What are the `.backup-before-restore-...` files in `data/`?**
 The data a restore replaced, saved just before it. To undo a restore, stop
-the backend, move your database (`asset-tracker.sqlite` or
-`mortgage.sqlite`, plus any `-wal` and `-shm` files beside it) out of
-`data/`, copy the `.backup-before-restore-...` file in under the
+the backend, move your database (`asset-tracker.sqlite`, plus
+any `-wal` and `-shm` files beside it) out of `data/`, copy the `.backup-before-restore-...` file in under the
 database's name, and start the backend again. Delete these files once
 you're happy.
 
@@ -949,18 +917,14 @@ A copy of the old database is always saved first.
 Work down the list. None of these steps touch your budget.
 
 **`Bind for 0.0.0.0:5007 failed: port is already allocated`**
-Something else is already using port 5007, usually the add-on's own
-containers under an older name (for example `mortgage-proxy` from before the
-rename).
+Something else is already using port 5007, often the add-on's own
+containers from the other setup (A or B).
 1. Make sure `.env` has the right `COMPOSE_FILE` for your setup, then run
-   `docker compose up -d --remove-orphans`. That removes the old containers.
+   `docker compose up -d --remove-orphans`. That removes the leftover
+   containers.
 2. Still failing? See what holds the port:
    `docker ps --format '{{.Names}}\t{{.Ports}}' | grep 5007`. Stop that
    container, or set a different `PROXY_PORT` in `.env`.
-
-**`pull access denied for ab-asset-tracker-...`**
-Harmless on older versions: Compose looked online for images that are built
-locally, then built them. Current versions build without looking online.
 
 **A second Actual container appeared (`...-actual-1`).**
 `docker compose` ran setup B's file while you use setup A. Set
@@ -1173,7 +1137,7 @@ in-memory mock with three made-up loans and a mock sidebar. Add
 
 **Tests use no real Actual server or data.** Backend tests run against an
 in-memory database and a fake Actual source (`src/server/testing.ts`). The
-migration tests load databases made by the last single-loan release
+migration tests load databases in the tracker's first schema
 (`test/fixtures`) and check the migrated loan matches its numbers exactly.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes, and
@@ -1190,7 +1154,7 @@ src/server/      Backend: config, read-only Actual adapter, SQLite store and mig
 src/ui/          Loan screens (React), sidebar list, API client, styles, preview
 src/inject/      The one script the proxy injects into Actual's page
 proxy/           nginx image: TLS, pass-through, one-line injection
-test/fixtures/   Databases from the last single-loan release, for the migration tests
+test/fixtures/   Databases in the first schema, for the migration tests
 examples/        Made-up sample loans (cents)
 scripts/         UI build, Docker-only npm wrapper
 docs/            Screenshots, decisions, known limitations, publishing notes
