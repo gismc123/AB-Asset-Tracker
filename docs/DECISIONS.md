@@ -19,6 +19,8 @@ decided by the maintainer; the rest are defaults that can be revisited.
 - **`TZ` defaults to `Etc/UTC`.** Neutral for a public project; the previous example was one specific US zone. An invalid name stops the backend with a clear message.
 - **`BACKEND_PORT`, `ACTUAL_IMAGE`, `TLS_CERT_FILE` and `TLS_KEY_FILE` are configurable.** They are host-facing or user-replaceable values; the proxy's in-container port 8443 and Docker's DNS address stay fixed because nothing outside the container sees them.
 - **`TLS_CERT_FILE` / `TLS_KEY_FILE` are now passed to the proxy.** The old README documented them, but compose never forwarded them, so setting them did nothing.
+- **`COMPOSE_FILE` in `.env` picks the setup, defaulting to setup A.** Every command becomes plain `docker compose ...`; without it, a setup A user who forgot `-f` started setup B by accident (a stray Actual container and a port clash on 5007, seen on the first real upgrade).
+- **The add-on services use `pull_policy: build`.** Compose no longer tries to pull images that only exist locally (the "pull access denied" warnings), and `docker compose up -d` after `git pull` rebuilds what changed.
 - **A `SUMMARY_TOKEN` under 16 characters is a warning, not an error.** It still works, and a startup failure over token length would be surprising.
 
 ## Data model and migration

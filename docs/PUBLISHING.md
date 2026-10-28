@@ -19,8 +19,9 @@ maintainer to review and run by hand.
 ## Before making it public
 
 1. Review the `feature/multi-loan` branch and merge it into `main`.
-2. Replace `<owner>/<repo>` in the README's clone commands with the real
-   repository path.
+2. Rename the repository to `AB-Asset-Tracker` (the README's clone command
+   and issue links already use that name, and the local `origin` remote
+   already points there).
 3. Git history: the author name and email on existing commits were left as
    they are (decision in `docs/DECISIONS.md`). No secrets, private IPs,
    sync IDs or addresses were found in the history.

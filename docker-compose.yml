@@ -1,8 +1,9 @@
-# Bundled stack: stock Actual + the AB Asset Tracker add-on.
+# Setup B, the bundled stack: stock Actual + the AB Asset Tracker add-on.
+# Selected by COMPOSE_FILE=docker-compose.yml in .env.
 #
 #   docker compose up -d            start everything
 #   docker compose pull actual && docker compose up -d actual
-#                                   monthly Actual update (touches nothing else)
+#                                   Actual update (touches nothing else)
 #
 # Open https://<host>:${PROXY_PORT} (default 5007) to use Actual with the
 # Loans item. In .env use:

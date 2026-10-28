@@ -43,7 +43,8 @@ Open `dist/ui/preview.html` after a build to see every screen with made-up
 data (`?theme=dark`, `?empty`, `?privacy`, `?loan=2`).
 
 To try it against a real Actual, point `.env` at a **test** Actual server
-with a throwaway budget, then `docker compose -f compose.existing-actual.yml up -d --build`.
+with a throwaway budget, set `COMPOSE_FILE` for your setup, then run
+`docker compose up -d`.
 
 ## Making a change
 

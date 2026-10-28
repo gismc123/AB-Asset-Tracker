@@ -1,8 +1,9 @@
-# Add-on only, in front of an Actual server you already run on this host
-# (for example from its own docker-compose file, publishing port 5006).
-# Your existing Actual container is not modified, restarted, or reconfigured.
+# Setup A: the add-on only, in front of an Actual server you already run on
+# this host (for example from its own docker-compose file, publishing port
+# 5006). Your existing Actual container is not modified, restarted, or
+# reconfigured. Selected by COMPOSE_FILE=compose.existing-actual.yml in .env.
 #
-#   docker compose -f compose.existing-actual.yml up -d
+#   docker compose up -d
 #
 # The name "actual" is mapped to the Docker host, so the backend and proxy
 # reach your server at https://actual:5006. Self-signed certificates that

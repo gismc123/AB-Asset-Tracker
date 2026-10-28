@@ -2,14 +2,17 @@
 # Neither of them is Actual. Updating Actual never touches these, and
 # rebuilding these never touches Actual.
 #
-# You normally don't run this file directly. Use one of:
-#   docker compose up -d                                   (bundled: Actual + add-on)
-#   docker compose -f compose.existing-actual.yml up -d    (add-on in front of an Actual you already run)
+# You never run this file directly. COMPOSE_FILE in .env picks one of:
+#   compose.existing-actual.yml   A: add-on in front of an Actual you already run
+#   docker-compose.yml            B: bundled, Actual + add-on
 
 services:
   asset-tracker-backend:
     build: .
     image: ab-asset-tracker-backend:local
+    # Always built here, never pulled: no "pull access denied" warnings, and
+    # `docker compose up -d` after a `git pull` rebuilds what changed.
+    pull_policy: build
     restart: unless-stopped
     env_file: .env
     environment:
@@ -26,6 +29,7 @@ services:
   asset-tracker-proxy:
     build: ./proxy
     image: ab-asset-tracker-proxy:local
+    pull_policy: build
     restart: unless-stopped
     environment:
       ACTUAL_UPSTREAM: ${ACTUAL_UPSTREAM:?Set ACTUAL_UPSTREAM in .env}
