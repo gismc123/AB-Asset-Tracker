@@ -146,6 +146,11 @@ const RULES: { value: PmiRemovalRule; title: string; text: string }[] = [
     title: 'I will request removal at 80%',
     text: 'You ask the servicer in writing once the real balance reaches 80%. Extra payments pull this earlier.',
   },
+  {
+    value: 'untilRemoved',
+    title: 'Keep PMI until I record it removed',
+    text: 'PMI stays on every payment, past 80%, 78% and the midpoint, until you mark it removed on the Overview. For a servicer that hasn\'t dropped it yet, or insurance that lasts the life of the loan.',
+  },
 ];
 
 function Money({ id, label, hint, value, onChange, placeholder }: {

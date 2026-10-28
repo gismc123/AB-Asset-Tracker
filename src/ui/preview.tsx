@@ -157,6 +157,7 @@ interface Month {
   resolution: string | null;
 }
 
+const isPmiRemoval = (a: { adj: Adjustment; source: number | null }) => a.source === null && a.adj.kind === 'pmi' && a.adj.amount === 0;
 const later = <T,>(v: T) => new Promise<T>((r) => setTimeout(() => r(v), 150));
 let nextId = 100;
 
@@ -324,6 +325,17 @@ class MockLoan {
         const covering = self.coveringPlan(n);
         if (covering) self.adjustments.splice(self.adjustments.indexOf(covering), 1);
         self.adjustments.push({ adj: { kind: 'catchUpPlan', fromPayment, months }, source: null });
+        return state();
+      },
+      async setPmiRemoval(fromPayment) {
+        const paid = [...self.months].find(([k, m]) => m.status === 'paid' && k >= fromPayment);
+        if (paid) throw new ApiError(409, `Payment ${paid[0]} is already reconciled with the PMI it paid. Pick a payment after it, or undo that month first.`);
+        self.dropAdjustments(isPmiRemoval);
+        self.adjustments.push({ adj: { kind: 'pmi', fromPayment, amount: 0 }, source: null });
+        return state();
+      },
+      async clearPmiRemoval() {
+        self.dropAdjustments(isPmiRemoval);
         return state();
       },
       async clearCatchUpPlan(n) {

@@ -352,6 +352,13 @@ export class LoanStore {
       .run(this.loanId, payment);
   }
 
+  /** Remove the hand-recorded PMI removal (PMI changes from reconciliation stay). */
+  deletePmiRemoval() {
+    this.db
+      .prepare(`DELETE FROM adjustments WHERE loan_id = ? AND kind = 'pmi' AND amount = 0 AND source_payment IS NULL`)
+      .run(this.loanId);
+  }
+
   // --- months -----------------------------------------------------------------
 
   listMonths(): MonthRecord[] {

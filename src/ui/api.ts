@@ -77,6 +77,9 @@ export interface LoanClient {
   unskip(payment: number): Promise<StateView>;
   setCatchUpPlan(payment: number, fromPayment: number, months: number): Promise<StateView>;
   clearCatchUpPlan(payment: number): Promise<StateView>;
+  /** Record that PMI stopped from this payment on; replaces an earlier record. */
+  setPmiRemoval(fromPayment: number): Promise<StateView>;
+  clearPmiRemoval(): Promise<StateView>;
   /** Create the loan's asset, or update the one it has. */
   saveAsset(asset: AssetFields): Promise<StateView>;
   addAssetValue(assetId: number, value: { date: ISODate; value: Cents; source: string }): Promise<StateView>;
@@ -146,6 +149,8 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       unskip: (n) => call('POST', `${at}/months/${n}/unskip`),
       setCatchUpPlan: (n, fromPayment, months) => call('PUT', `${at}/months/${n}/catch-up`, { fromPayment, months }),
       clearCatchUpPlan: (n) => call('DELETE', `${at}/months/${n}/catch-up`),
+      setPmiRemoval: (fromPayment) => call('PUT', `${at}/pmi/removal`, { fromPayment }),
+      clearPmiRemoval: () => call('DELETE', `${at}/pmi/removal`),
       async saveAsset(asset) {
         const current = (await state()).asset;
         if (current) await call('PATCH', `/assets/${current.id}`, asset);

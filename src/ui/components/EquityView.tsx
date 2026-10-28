@@ -258,7 +258,7 @@ function AssetValues({ state, client, onState, kind }: Props & { kind: AssetKind
     ev.preventDefault();
     if (!asset) return setError(`Save the ${noun} below first`);
     const cents = parseDollars(d.value);
-    if (!cents || cents <= 0) return setError('Enter the value, like 410,000');
+    if (cents === null || cents < 0) return setError('Enter the value, like 410,000 (0 for a total loss)');
     if (await run(() => client.addAssetValue(asset.id, { date: d.date, value: cents, source: d.source.trim() || 'Estimate' }))) {
       setD((p) => ({ ...p, value: '' }));
     }

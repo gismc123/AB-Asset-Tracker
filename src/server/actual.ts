@@ -63,13 +63,19 @@ interface RawTxn {
 /** Only re-sync with the server when data is older than this. */
 const SYNC_INTERVAL_MS = 30_000;
 
+type ActualApi = typeof import('@actual-app/api');
+
 export class ActualApiSource implements BudgetSource {
-  private api: typeof import('@actual-app/api') | null = null;
+  private api: ActualApi | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private lastSyncAt = 0;
   private state: SourceStatus = { connected: false, lastSync: null, error: null };
 
-  constructor(private readonly conn: ActualConnection) {}
+  constructor(
+    private readonly conn: ActualConnection,
+    /** Replaced in tests. */
+    private readonly loadApi: () => Promise<ActualApi> = () => import('@actual-app/api'),
+  ) {}
 
   status(): SourceStatus {
     return { ...this.state };
@@ -86,7 +92,12 @@ export class ActualApiSource implements BudgetSource {
     if (this.api) {
       if (Date.now() - this.lastSyncAt > SYNC_INTERVAL_MS) {
         // Pull the latest changes. We never make local changes, so nothing is pushed.
-        await this.api.sync();
+        // A failed sync (Actual restarting, say) is retried on the next request.
+        try {
+          await this.api.sync();
+        } catch (err) {
+          throw this.unavailable(`Could not sync the budget with Actual: ${describe(err)}`, err);
+        }
         this.markSynced();
       }
       return this.api;
@@ -94,16 +105,20 @@ export class ActualApiSource implements BudgetSource {
     const cacheDir = path.join(this.conn.dataDir, 'actual-cache');
     fs.mkdirSync(cacheDir, { recursive: true });
     try {
-      const api = await import('@actual-app/api');
+      const api = await this.loadApi();
       await api.init({ dataDir: cacheDir, serverURL: this.conn.serverURL, password: this.conn.password });
       await api.downloadBudget(this.conn.syncId, this.conn.budgetPassword ? { password: this.conn.budgetPassword } : {});
       this.api = api;
       this.markSynced();
       return api;
     } catch (err) {
-      this.state = { ...this.state, connected: false, error: describe(err) };
-      throw new SourceUnavailable(`Could not load the budget from Actual: ${describe(err)}`);
+      throw this.unavailable(`Could not load the budget from Actual: ${describe(err)}`, err);
     }
+  }
+
+  private unavailable(message: string, err: unknown): SourceUnavailable {
+    this.state = { ...this.state, connected: false, error: describe(err) };
+    return new SourceUnavailable(message);
   }
 
   private markSynced() {

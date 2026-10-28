@@ -21,11 +21,16 @@ export type ISODate = string;
  *   reaches 78%. Some servicers act on this; confirm with yours.
  * - `request80`: when the real balance reaches 80% and you plan to ask the
  *   servicer to cancel PMI.
+ * - `untilRemoved`: PMI stays on every payment until a PMI change of zero
+ *   is recorded, however far the balance falls. For a servicer that keeps
+ *   charging it past the milestones, insurance that runs for the life of
+ *   the loan, or removal on a new appraisal.
  *
- * Whatever the rule, the federal automatic date and the loan midpoint act as
- * a backstop: PMI never stays on the schedule past either of them.
+ * For the first three rules, the federal automatic date and the loan
+ * midpoint act as a backstop: PMI never stays on the schedule past either
+ * of them, unless a PMI change recorded after that point says otherwise.
  */
-export type PmiRemovalRule = 'auto78Scheduled' | 'auto78Actual' | 'request80';
+export type PmiRemovalRule = 'auto78Scheduled' | 'auto78Actual' | 'request80' | 'untilRemoved';
 
 /**
  * Where tracking starts on a loan that was already under way when it was set

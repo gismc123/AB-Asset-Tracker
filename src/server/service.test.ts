@@ -257,6 +257,13 @@ describe('equity, periods and escrow in state', () => {
     await expectHttp(() => tracker.addAssetValue(999, { date: '2025-06-01', value: 1 }), 404);
   });
 
+  it('accepts a value of zero, for an asset that is a total loss', () => {
+    const id = service.state().asset!.id;
+    tracker.addAssetValue(id, { date: '2025-06-01', value: 0, source: 'Total loss' });
+    const s = service.state().summary!;
+    expect(s.asset).toMatchObject({ value: 0, equity: -s.owed, equityPercent: 0 });
+  });
+
   it('puts paid escrow and recorded bills into the escrow ledger', async () => {
     source.add('t1', '2025-03-30', -row(1).total);
     await service.match(1, { transactionId: 't1' });
@@ -338,6 +345,66 @@ describe('catch-up plans', () => {
     expect(row(2).catchUp!.total).toBe(row(1).pastDue);
     expect((await service.match(2, { transactionId: 't2' })).status).toBe('paid');
     expect(service.state().summary!.pastDue).toBe(0);
+  });
+
+  it('only clears a plan from the missed month it repays', async () => {
+    service.skip(2, { mode: 'catchUp' });
+    service.setCatchUpPlan(2, { fromPayment: 5, months: 2 });
+    const plans = () => store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan');
+    await expectHttp(() => service.clearCatchUpPlan(4), 409);
+    expect(plans()).toHaveLength(1);
+    service.clearCatchUpPlan(2);
+    expect(plans()).toHaveLength(0);
+  });
+});
+
+describe('keeping PMI until it is removed', () => {
+  beforeEach(() => {
+    service.saveSetup({ ...SAMPLE_SETUP, pmiRemovalRule: 'untilRemoved' });
+  });
+  const pmiChanges = (s: ReturnType<LoanService['state']>) => s.adjustments.filter((a) => a.adjustment.kind === 'pmi');
+
+  it('keeps PMI in every payment and says so in the summary', () => {
+    const s = service.state();
+    expect(s.setup!.pmiRemovalRule).toBe('untilRemoved');
+    expect(s.schedule!.rows.every((r) => r.pmi === SAMPLE_SETUP.pmiMonthly)).toBe(true);
+    expect(s.summary!.pmi).toMatchObject({ active: true, dropPayment: null, paymentsUntilDrop: null, removalRule: 'untilRemoved' });
+  });
+
+  it('records the removal, replaces it, and undoes it', () => {
+    let s = service.setPmiRemoval({ fromPayment: 100 });
+    expect(s.schedule!.rows[98]!.pmi).toBe(SAMPLE_SETUP.pmiMonthly);
+    expect(s.schedule!.rows[99]!.pmi).toBe(0);
+    expect(s.schedule!.pmi.dropPayment).toBe(100);
+    s = service.setPmiRemoval({ fromPayment: 120 });
+    expect(s.schedule!.pmi.dropPayment).toBe(120);
+    expect(pmiChanges(s)).toHaveLength(1);
+    s = service.clearPmiRemoval();
+    expect(s.schedule!.pmi.dropPayment).toBeNull();
+    expect(pmiChanges(s)).toHaveLength(0);
+  });
+
+  it("can't start on or before a reconciled month, which keeps the PMI it paid", async () => {
+    source.add('t1', '2025-04-01', -row(1).total);
+    await service.match(1, { transactionId: 't1' });
+    await expectHttp(() => service.setPmiRemoval({ fromPayment: 1 }), 409);
+    const s = service.setPmiRemoval({ fromPayment: 2 });
+    expect(s.schedule!.rows[0]!.pmi).toBe(SAMPLE_SETUP.pmiMonthly);
+    expect(s.schedule!.pmi.dropPayment).toBe(2);
+  });
+
+  it('leaves PMI changes made while reconciling alone', async () => {
+    source.add('t1', '2025-04-01', -(row(1).total - SAMPLE_SETUP.pmiMonthly));
+    await service.match(1, { transactionId: 't1' });
+    service.resolve(1, { resolution: 'pmi' });
+    expect(pmiChanges(service.clearPmiRemoval())).toHaveLength(1);
+  });
+
+  it('rejects a bad payment number, and a loan without PMI', async () => {
+    await expectHttp(() => service.setPmiRemoval({ fromPayment: 0 }), 400);
+    await expectHttp(() => service.setPmiRemoval({ fromPayment: 9_999 }), 404);
+    service.saveSetup({ ...SAMPLE_SETUP, modules: { pmi: false, escrow: true } });
+    await expectHttp(() => service.setPmiRemoval({ fromPayment: 10 }), 409);
   });
 });
 
