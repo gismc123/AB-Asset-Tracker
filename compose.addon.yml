@@ -37,6 +37,8 @@ services:
       # File names inside ACTUAL_CERT_DIR (mounted at /certs).
       TLS_CERT_FILE: ${TLS_CERT_FILE:-tls.crt}
       TLS_KEY_FILE: ${TLS_KEY_FILE:-tls.key}
+      # off = plain HTTP, for a Cloudflare Tunnel or reverse proxy that handles HTTPS.
+      PROXY_TLS: ${PROXY_TLS:-on}
     volumes:
       # Read-write only so a self-signed pair can be generated on first start
       # when the folder is empty. Existing files are never overwritten.

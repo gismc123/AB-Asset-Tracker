@@ -27,6 +27,10 @@ maintainer to review and run by hand.
    sync IDs or addresses were found in the history.
 4. Check that `.env`, `data/`, `certs/` and `actual-data/` are not tracked:
    `git ls-files .env data certs actual-data` should print nothing.
+5. Turn on private vulnerability reporting (Settings, then *Code security*,
+   then *Private vulnerability reporting*). `SECURITY.md` and the issue
+   chooser send reporters there.
+6. Check that the **CI** workflow passes on `main` (the *Actions* tab).
 
 ## Commands (for reference, not run)
 

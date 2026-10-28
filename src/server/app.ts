@@ -64,8 +64,10 @@ export function createApp(deps: AppDeps) {
 
   const api = express.Router();
 
+  // No login needed, so it says only whether Actual is connected. The error
+  // and sync time are in the loan state, for logged-in users.
   api.get('/health', (_req, res) => {
-    res.json({ ok: true, actual: service.sourceStatus() });
+    res.json({ ok: true, actual: { connected: service.sourceStatus().connected } });
   });
 
   // --- read-only summary for dashboards --------------------------------------
@@ -172,6 +174,12 @@ export function createApp(deps: AppDeps) {
   });
   loan.delete('/months/:payment/catch-up', (req, res) => {
     res.json(one(req).clearCatchUpPlan(paymentParam(req)));
+  });
+  loan.put('/pmi/removal', (req, res) => {
+    res.json(one(req).setPmiRemoval(req.body));
+  });
+  loan.delete('/pmi/removal', (req, res) => {
+    res.json(one(req).clearPmiRemoval());
   });
   loan.post('/escrow/entries', (req, res) => {
     res.json(one(req).addEscrowEntry(req.body));
@@ -296,6 +304,7 @@ export function summaryForDisplay(loan: LoanRecord, s: LoanSummary) {
           daysUntilDrop: s.pmi.daysUntilDrop,
           requestRemovalDate: s.pmi.request80Date,
           automaticRemovalDate: s.pmi.auto78Date,
+          removalRule: s.pmi.removalRule,
         }
       : null,
   };

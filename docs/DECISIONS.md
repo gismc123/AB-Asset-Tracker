@@ -60,6 +60,9 @@ decided by the maintainer; the rest are defaults that can be revisited.
 - **Milestones: homes keep 20/22/25/50/75/100% (the PMI lines); other assets get 0/25/50/75/100%.** "Worth more than you owe" is the milestone that matters for vehicles.
 - **A mortgage with no asset row falls back to the home described by its setup, and saving a mortgage's setup records that home.** A mortgage always has a home, and this keeps equity working for loans created by API without an asset.
 
+- **A fourth PMI rule, `untilRemoved`, has no planned drop and no federal backstops; PMI ends only where a PMI change of zero is recorded.** Real servicers keep charging past 78% and the midpoint (the borrower wasn't current, they're slow, or the loan isn't covered by the HPA), and FHA MIP can last the life of the loan. The three original rules keep their backstops unchanged.
+- **A recorded PMI removal is a PMI adjustment of 0 with no source month, at most one per loan, and it can't start on or before a reconciled month.** It reuses the adjustment the reconcile flow already writes, so the schedule logic needs no new case, and a reconciled month keeps the PMI it really paid.
+
 ## API
 
 - **Summary is version 2.** Its shape changed (a list of loans, an `asset` block, `owed`, `payoff`, `pmi: null` without PMI), so the version had to move.
@@ -69,6 +72,10 @@ decided by the maintainer; the rest are defaults that can be revisited.
 - **Archived loans stay in `GET /loans`, sorted last, and are hidden from the picker, sidebar and summary.** Archiving hides without losing history.
 - **Escrow entries are refused (409) on loans with escrow off, and reconcile only offers escrow or PMI answers when the loan has them.** Those answers can't be right for such a loan.
 - **New loans have no category until you pick one (or pass `categoryId` when creating).** Guessing a category could match the wrong payments.
+- **`GET /health` says only whether Actual is connected.** It needs no login, and Actual's error text and sync times are for logged-in users (they're in the loan state).
+- **A failed re-sync with Actual is a 503, like a failed first load, and is retried on the next request.** It happens on every Actual update or restart and shouldn't look like a tracker bug.
+- **An asset value can be 0.** A totaled car or a written-off asset is worth nothing; the original value already allowed 0.
+- **Removing a catch-up plan is refused (409) for a month that isn't a missed payment to catch up.** Otherwise it removed whichever plan came next, which may belong to another skip.
 
 ## UI
 
@@ -76,6 +83,13 @@ decided by the maintainer; the rest are defaults that can be revisited.
 - **Personal loans have no asset by default, with an "Add an asset" button on their Totals screen.** Most personal loans don't buy anything with a resale value.
 - **A new mortgage's original home value for PMI starts as the purchase price.** One number to type at first, editable under Setup when the lender used a lower appraisal.
 - **`state.homeValues` is replaced by `state.asset.values`.** Values belong to the asset now, whatever its kind.
+
+## Proxy
+
+- **`PROXY_TLS=off` serves plain HTTP for a Cloudflare Tunnel or reverse proxy that handles HTTPS, and is off unless asked for.** The default stays HTTPS, because Actual needs a secure page and most installs open the port directly. With it off, no certificate is generated, and `X-Forwarded-Proto` comes from what's in front (or the connection itself).
+- **Every `proxy_set_header` is at the server level.** A location with any of its own inherits none, so until now `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` never reached Actual, and a client's own `X-Forwarded-Proto` passed straight through.
+- **Listening on one address goes through `PROXY_PORT` (`127.0.0.1:5007`)** rather than a new setting. Compose already accepts it, and the default keeps listening on IPv4 and IPv6.
+- **The proxy gzips responses itself.** It asks Actual for uncompressed pages so it can add the script tag, so without this Actual's large JavaScript went out uncompressed.
 
 ## Tests and docs
 

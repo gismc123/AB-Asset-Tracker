@@ -2,7 +2,7 @@ import { modulesOf } from './amortize.js';
 import { currentValue, hasProjection, homeAssetFor, latestValue, projectedValue, type Asset, type AssetKind, type AssetValue } from './assets.js';
 import { daysBetween } from './dates.js';
 import { dailyInterest } from './money.js';
-import type { Cents, ISODate, LoanSetup, Schedule, ScheduleRow } from './types.js';
+import type { Cents, ISODate, LoanSetup, PmiRemovalRule, Schedule, ScheduleRow } from './types.js';
 
 /** Kept for code written before assets: a value estimate of the home. */
 export type HomeValueEstimate = AssetValue;
@@ -78,6 +78,8 @@ export interface LoanSummary {
     daysUntilDrop: number | null;
     request80Date: ISODate | null;
     auto78Date: ISODate | null;
+    /** `untilRemoved`: no drop is planned; PMI stays until its removal is recorded. */
+    removalRule: PmiRemovalRule;
   };
 }
 
@@ -199,6 +201,7 @@ export function summarize(
       daysUntilDrop: active && p.dropDate ? Math.max(0, daysBetween(today, p.dropDate)) : active ? null : 0,
       request80Date: p.request80.dueDate,
       auto78Date: p.auto78Scheduled.dueDate,
+      removalRule: setup.pmiRemovalRule,
     },
   };
 }

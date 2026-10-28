@@ -369,7 +369,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
               </div>
             </div>
             {modules.pmi ? (
-              <PmiCountdown pmi={s.pmi} status={state.summary.pmi} nextPayment={s.currentPayment} rule={state.setup.pmiRemovalRule} />
+              <PmiCountdown state={state} client={client} onState={setState} />
             ) : (
               <PayoffCard summary={state.summary} totals={s.totals} />
             )}

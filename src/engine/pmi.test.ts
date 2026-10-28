@@ -145,3 +145,38 @@ describe('PMI changes', () => {
     expect(s.rows[planned]!.pmi).toBe(13_100);
   });
 });
+
+describe('keeping PMI until it is removed', () => {
+  const kept = generateSchedule({ ...loan, pmiRemovalRule: 'untilRemoved' });
+  const standard = generateSchedule(loan);
+
+  it('charges PMI past 78% and the midpoint, through the last payment', () => {
+    expect(kept.rows[kept.pmi.auto78Scheduled.payment!]!.pmi).toBe(13_100);
+    expect(kept.rows[kept.pmi.midpoint.payment]!.pmi).toBe(13_100);
+    expect(kept.rows.every((r) => r.pmi === 13_100)).toBe(true);
+    expect(kept.pmi.hasPmi).toBe(true);
+    expect(kept.pmi.dropPayment).toBeNull();
+    expect(kept.pmi.dropDate).toBeNull();
+    expect(kept.totals.pmi).toBe(13_100 * kept.rows.length);
+  });
+
+  it('still reports the milestones, for reference', () => {
+    expect(kept.pmi.request80).toEqual(standard.pmi.request80);
+    expect(kept.pmi.auto78Scheduled).toEqual(standard.pmi.auto78Scheduled);
+    expect(kept.pmi.midpoint).toEqual(standard.pmi.midpoint);
+  });
+
+  it('stops PMI where a PMI change of zero is recorded', () => {
+    const removed = generateSchedule({ ...loan, pmiRemovalRule: 'untilRemoved' }, { adjustments: [{ kind: 'pmi', fromPayment: 200, amount: 0 }] });
+    expect(removed.rows[198]!.pmi).toBe(13_100);
+    expect(removed.rows.slice(199).every((r) => r.pmi === 0)).toBe(true);
+    expect(removed.pmi.dropPayment).toBe(200);
+  });
+
+  it('lets a recorded removal end PMI early under the other rules too', () => {
+    const early = generateSchedule(loan, { adjustments: [{ kind: 'pmi', fromPayment: 50, amount: 0 }] });
+    expect(early.pmi.dropPayment).toBe(50);
+    expect(early.rows[48]!.pmi).toBe(13_100);
+    expect(early.rows[49]!.pmi).toBe(0);
+  });
+});

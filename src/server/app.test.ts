@@ -29,7 +29,19 @@ describe('HTTP API', () => {
   it('health needs no login', async () => {
     const res = await request(app).get(`${API}/health`);
     expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
+    // Only whether Actual is connected: its errors and sync times need a login.
+    expect(res.body).toEqual({ ok: true, actual: { connected: true } });
+  });
+
+  it('records and undoes a PMI removal', async () => {
+    const id = await newLoan({ nickname: 'Mortgage', type: 'mortgage', setup: { ...SAMPLE_SETUP, pmiRemovalRule: 'untilRemoved' } });
+    const set = await authed(request(app).put(`${API}/loans/${id}/pmi/removal`).send({ fromPayment: 100 }));
+    expect(set.status).toBe(200);
+    expect(set.body.schedule.pmi.dropPayment).toBe(100);
+    const cleared = await authed(request(app).delete(`${API}/loans/${id}/pmi/removal`));
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.summary.pmi).toMatchObject({ dropPayment: null, removalRule: 'untilRemoved' });
+    expect((await request(app).put(`${API}/loans/${id}/pmi/removal`).send({ fromPayment: 100 })).status).toBe(401);
   });
 
   it('rejects requests without a valid Actual session', async () => {

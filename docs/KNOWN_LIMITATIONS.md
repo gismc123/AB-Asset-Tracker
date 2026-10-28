@@ -37,9 +37,13 @@ is planned, and in what order, is in the [roadmap](ROADMAP.md).
 
 ## Mortgages
 
-- **PMI follows U.S. conventional-loan rules** (Homeowners Protection Act).
-  FHA MIP, VA funding fees, USDA guarantee fees and lender-paid PMI aren't
-  modeled.
+- **PMI dates follow U.S. conventional-loan rules** (Homeowners Protection
+  Act). FHA MIP, VA funding fees, USDA guarantee fees and lender-paid PMI
+  have no rules of their own. Insurance that lasts the life of the loan, or
+  ends on a date you know, can be tracked with *Keep PMI until I record it
+  removed* and a recorded removal.
+- **PMI removal is a payment, not a date.** It's recorded from a payment
+  number onward; a premium refund or a partial last month isn't modeled.
 - **Escrow is for mortgages only**, and its ledger starts empty for a loan
   that was already under way.
 
@@ -62,6 +66,10 @@ is planned, and in what order, is in the [roadmap](ROADMAP.md).
   stays right, you still enter those splits yourself. The tracker works out
   the numbers but doesn't write them.
 - **One budget (one Sync ID) per install.**
+- **Every Actual user sees every loan.** With Actual's multi-user (OpenID)
+  login, anyone who can log in to the server can see and change all loans,
+  whichever budgets they can open in Actual. The tracker has no users or
+  permissions of its own.
 - **Desktop layout only.** Narrow windows and phones use Actual's mobile
   layout, which has no sidebar, so Loans is hidden there.
 - **The sidebar item depends on Actual's page markup.** A big Actual update

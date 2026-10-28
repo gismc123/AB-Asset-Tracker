@@ -14,6 +14,7 @@ import {
   MAX_TERM_MONTHS,
   lockRow,
   MAX_PENNY_OFFSET,
+  PMI_REMOVAL_RULES,
   resolutionToAdjustment,
   ResolutionError,
   SetupError,
@@ -130,7 +131,6 @@ const WINDOW_BEFORE = 25;
 const WINDOW_AFTER = 20;
 const WIDE_WINDOW = 60;
 
-const RULES: PmiRemovalRule[] = ['auto78Scheduled', 'auto78Actual', 'request80'];
 const SKIP_MODES: SkipMode[] = ['catchUp', 'capitalize', 'defer'];
 /** Longest catch-up plan accepted, in payments. */
 const MAX_CATCH_UP_MONTHS = 120;
@@ -147,10 +147,10 @@ function dateField(b: Record<string, unknown>, key: string): ISODate {
   return b[key] as ISODate;
 }
 
-function amountField(b: Record<string, unknown>, key: string): Cents {
+function amountField(b: Record<string, unknown>, key: string, { allowZero = false } = {}): Cents {
   const v = b[key];
-  if (!Number.isInteger(v) || (v as number) <= 0 || (v as number) > MAX_AMOUNT) {
-    throw new HttpError(400, `${key} must be a positive amount in cents`);
+  if (!Number.isInteger(v) || (v as number) < (allowZero ? 0 : 1) || (v as number) > MAX_AMOUNT) {
+    throw new HttpError(400, `${key} must be ${allowZero ? 'zero or more' : 'a positive amount'}, in cents`);
   }
   return v as Cents;
 }
@@ -208,7 +208,7 @@ export function parseSetup(body: unknown): LoanSetup {
     originalHomeValue: int('originalHomeValue'),
     pmiMonthly: int('pmiMonthly'),
     pmiStartDate: b.pmiStartDate ? str('pmiStartDate') : null,
-    pmiRemovalRule: RULES.includes(b.pmiRemovalRule as PmiRemovalRule) ? (b.pmiRemovalRule as PmiRemovalRule) : 'auto78Scheduled',
+    pmiRemovalRule: PMI_REMOVAL_RULES.includes(b.pmiRemovalRule as PmiRemovalRule) ? (b.pmiRemovalRule as PmiRemovalRule) : 'auto78Scheduled',
     escrowMonthly: int('escrowMonthly'),
     extraPrincipal: int('extraPrincipal'),
     startingPoint: parseStartingPoint(b.startingPoint),
@@ -679,8 +679,44 @@ export class LoanService {
   }
 
   clearCatchUpPlan(payment: number) {
+    const row = this.row(this.build(this.requireSetup()), payment);
+    if (row.skipped !== 'catchUp') throw new HttpError(409, `Payment ${payment} isn't a missed payment to catch up`);
     const plan = this.coveringPlan(payment);
     if (plan) this.store.deleteAdjustment(plan.id);
+    return this.state();
+  }
+
+  // --- PMI removal ------------------------------------------------------------------
+
+  /**
+   * Record that the servicer stopped charging PMI from `fromPayment` on, as a
+   * PMI change of zero. Replaces an earlier record. Works with every removal
+   * rule, and is the only way PMI ends under `untilRemoved`.
+   */
+  setPmiRemoval(body: unknown) {
+    const from = bodyOf(body).fromPayment;
+    if (!Number.isInteger(from) || (from as number) < 1) throw new HttpError(400, 'fromPayment must be a payment number');
+    const setup = this.requireSetup();
+    if (!modulesOf(setup).pmi) throw new HttpError(409, 'PMI is turned off for this loan');
+    const fromPayment = from as number;
+    this.tracked(this.row(this.build(setup), fromPayment));
+    // A reconciled month keeps the PMI it really paid, so removal can't start on or before one.
+    const reconciled = this.store.listMonths().find((m) => m.status === 'paid' && m.payment >= fromPayment);
+    if (reconciled) {
+      throw new HttpError(
+        409,
+        `Payment ${reconciled.payment} is already reconciled with the PMI it paid. Pick a payment after it, or undo that month first.`,
+      );
+    }
+    this.root.transaction(() => {
+      this.store.deletePmiRemoval();
+      this.store.addAdjustment({ kind: 'pmi', fromPayment, amount: 0 }, null);
+    });
+    return this.state();
+  }
+
+  clearPmiRemoval() {
+    this.store.deletePmiRemoval();
     return this.state();
   }
 
@@ -936,7 +972,8 @@ export class TrackerService {
     const b = bodyOf(body);
     this.store.addAssetValue(assetId, {
       date: dateField(b, 'date'),
-      value: amountField(b, 'value'),
+      // Zero is a real value: a car that was totaled, an asset written off.
+      value: amountField(b, 'value', { allowZero: true }),
       source: textField(b, 'source', 100) || 'Estimate',
     });
     return this.store.getAsset(assetId)!;

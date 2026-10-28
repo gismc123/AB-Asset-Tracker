@@ -9,6 +9,7 @@ import type {
   LockedPayment,
   PmiInfo,
   PmiMilestone,
+  PmiRemovalRule,
   Schedule,
   ScheduleRow,
   PaymentParts,
@@ -40,6 +41,8 @@ export function termMonthsOf(setup: LoanSetup): number {
 
 /** Longest term accepted, in months. */
 export const MAX_TERM_MONTHS = 600;
+
+export const PMI_REMOVAL_RULES: readonly PmiRemovalRule[] = ['auto78Scheduled', 'auto78Actual', 'request80', 'untilRemoved'];
 
 export class SetupError extends Error {
   constructor(public readonly problems: string[]) {
@@ -75,7 +78,7 @@ export function validateSetup(s: LoanSetup): string[] {
   if (!modules.pmi && !isCents(s.originalHomeValue)) problems.push('Original home value must be zero or more');
   if (!isCents(s.pmiMonthly)) problems.push('Monthly PMI must be zero or more');
   if (s.pmiStartDate !== null && !isValidISODate(s.pmiStartDate)) problems.push('PMI start date is not a valid date');
-  if (!['auto78Scheduled', 'auto78Actual', 'request80'].includes(s.pmiRemovalRule)) problems.push('Unknown PMI removal rule');
+  if (!PMI_REMOVAL_RULES.includes(s.pmiRemovalRule)) problems.push('Unknown PMI removal rule');
   if (!isCents(s.escrowMonthly)) problems.push('Monthly escrow must be zero or more');
   if (!isCents(s.extraPrincipal)) problems.push('Extra principal must be zero or more');
   const start = s.startingPoint;
@@ -464,11 +467,17 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
   const midpointPayment = Math.ceil(months / 2);
   const midpoint = { payment: midpointPayment, dueDate: dueDateFor(setup.firstPaymentDate, setup.paymentDay, midpointPayment) };
 
-  const ruleDrop = { auto78Scheduled: after(auto78Scheduled), auto78Actual: after(auto78Actual), request80: after(request80) }[
-    setup.pmiRemovalRule
-  ];
-  // Federal backstops always apply: automatic termination and the midpoint.
-  const plannedDrop = Math.min(ruleDrop, after(auto78Scheduled), midpointPayment + 1);
+  // `untilRemoved` has no planned drop: PMI ends only where a PMI change of
+  // zero is recorded. The other rules always get the federal backstops,
+  // automatic termination and the midpoint.
+  const plannedDrop =
+    setup.pmiRemovalRule === 'untilRemoved'
+      ? Infinity
+      : Math.min(
+          { auto78Scheduled: after(auto78Scheduled), auto78Actual: after(auto78Actual), request80: after(request80) }[setup.pmiRemovalRule],
+          after(auto78Scheduled),
+          midpointPayment + 1,
+        );
   const pmiStart = setup.pmiStartDate ?? setup.firstPaymentDate;
 
   for (const row of rows) {
