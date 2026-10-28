@@ -143,10 +143,15 @@ export class Store {
     migrate(this.db, (from) => {
       if (file === ':memory:') return;
       const target = backupPath(file, from);
-      // A consistent copy even with a WAL file next to it.
-      this.db.prepare(`VACUUM INTO ?`).run(target);
+      this.copyTo(target);
       options.onBackup?.(target);
     });
+  }
+
+  /** Write a copy of the whole database to `target`, which must not exist yet. */
+  copyTo(target: string) {
+    // A consistent copy even with a WAL file next to it.
+    this.db.prepare(`VACUUM INTO ?`).run(target);
   }
 
   transaction<T>(fn: () => T): T {
@@ -435,8 +440,13 @@ export function databaseFile(dataDir: string): string {
 
 /** `data/asset-tracker.sqlite` → `data/asset-tracker.sqlite.backup-v1-2026-10-28T19-02-37Z` */
 export function backupPath(file: string, fromVersion: number, now = new Date()): string {
+  return copyPath(file, `v${fromVersion}`, now);
+}
+
+/** `data/asset-tracker.sqlite` → `data/asset-tracker.sqlite.backup-before-restore-2026-10-28T19-02-37Z` */
+export function copyPath(file: string, label: string, now = new Date()): string {
   const stamp = now.toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-');
-  return `${file}.backup-v${fromVersion}-${stamp}`;
+  return `${file}.backup-${label}-${stamp}`;
 }
 
 interface LoanRow {

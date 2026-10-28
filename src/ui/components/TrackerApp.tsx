@@ -5,11 +5,12 @@ import { date } from '../format.js';
 import { valueScreenLabel } from '../loanTypes.js';
 import { AddLoanWizard } from './AddLoanWizard.js';
 import { Amt } from './Amt.js';
+import { BackupView } from './BackupView.js';
 import { BalanceChart } from './BalanceChart.js';
 import { DetailsView } from './DetailsView.js';
 import { EquityView } from './EquityView.js';
 import { EscrowView } from './EscrowView.js';
-import { LoanPicker } from './LoanPicker.js';
+import { LoanPicker, type PickerScreen } from './LoanPicker.js';
 import { LoanSettings } from './LoanSettings.js';
 import { PaymentBreakdown } from './PaymentBreakdown.js';
 import { PayoffCard } from './PayoffCard.js';
@@ -59,7 +60,7 @@ export interface TrackerAppProps {
 export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect }: TrackerAppProps) {
   const [loans, setLoans] = useState<LoanListItem[] | null>(null);
   const [selected, setSelected] = useState<number | null>(initialLoan ?? remembered());
-  const [adding, setAdding] = useState(false);
+  const [screen, setScreen] = useState<PickerScreen>('loan');
   const [error, setError] = useState<ApiError | null>(null);
 
   const refreshLoans = useCallback(async () => {
@@ -80,7 +81,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
 
   const select = useCallback((id: number) => {
     setSelected(id);
-    setAdding(false);
+    setScreen('loan');
     remember(id);
   }, []);
   useEffect(() => bindSelect?.(select), [bindSelect, select]);
@@ -88,7 +89,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
   // Fall back to the first active loan when the chosen one is gone or archived.
   const active = loans?.filter((l) => !l.loan.archived) ?? [];
   const current = loans?.find((l) => l.loan.id === selected) ?? active[0] ?? loans?.[0] ?? null;
-  const shownId = adding || !current ? null : current.loan.id;
+  const shownId = screen !== 'loan' || !current ? null : current.loan.id;
   useEffect(() => onSelect?.(shownId), [onSelect, shownId]);
   const changed = useCallback(() => {
     void refreshLoans();
@@ -131,13 +132,49 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
     );
   }
 
-  if (loans.length === 0 || adding || !current) {
+  const picker = (shown: PickerScreen) => (
+    <LoanPicker loans={loans} selected={current?.loan.id ?? null} onSelect={select} onScreen={setScreen} screen={shown} />
+  );
+
+  if (screen === 'backup') {
+    return (
+      <div className="mt-page">
+        <Header title="Backup and restore" subtitle="Save everything in the tracker to a file, or load it back">
+          {loans.length > 0 ? (
+            picker('backup')
+          ) : (
+            <button type="button" className="mt-btn" onClick={() => setScreen('loan')}>
+              Back
+            </button>
+          )}
+        </Header>
+        <BackupView
+          client={client}
+          loans={loans}
+          onRestored={() => {
+            void refreshLoans();
+            onChange?.();
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (loans.length === 0 || screen === 'add' || !current) {
     return (
       <div className="mt-page">
         <Header title={loans.length === 0 ? 'Welcome' : 'Add a loan'} subtitle={loans.length === 0 ? 'Set up your first loan to get started' : undefined}>
-          {loans.length > 0 && <LoanPicker loans={loans} selected={current?.loan.id ?? null} onSelect={select} onAdd={() => setAdding(true)} adding />}
+          {loans.length > 0 && picker('add')}
         </Header>
-        <AddLoanWizard firstRun={loans.length === 0} onCreate={create} onCancel={loans.length > 0 ? () => setAdding(false) : undefined} />
+        <AddLoanWizard firstRun={loans.length === 0} onCreate={create} onCancel={loans.length > 0 ? () => setScreen('loan') : undefined} />
+        {loans.length === 0 && (
+          <p className="mt-kpi-note" style={{ marginTop: 14 }}>
+            Moving from another install?{' '}
+            <button type="button" className="mt-btn link" onClick={() => setScreen('backup')}>
+              Restore a backup
+            </button>
+          </p>
+        )}
       </div>
     );
   }
@@ -146,7 +183,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
     <LoanScreens
       key={current.loan.id}
       client={client.loan(current.loan.id)}
-      picker={<LoanPicker loans={loans} selected={current.loan.id} onSelect={select} onAdd={() => setAdding(true)} adding={false} />}
+      picker={picker('loan')}
       onChange={changed}
       onRename={async (nickname) => {
         await client.updateLoan(current.loan.id, { nickname });

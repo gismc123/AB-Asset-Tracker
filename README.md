@@ -631,6 +631,53 @@ date or the midpoint. If the servicer stops (or keeps) charging PMI on a
 different month, reconcile that month and answer **PMI changed**. No PMI at
 all? Turn it off under Setup.
 
+### Backing up and restoring
+
+Click **Backup** at the end of the loan tabs (on a fresh install, use
+*Restore a backup* under the welcome form).
+
+- **Download backup** saves everything in the tracker as one file, named
+  like `ab-asset-tracker-backup-2026-10-28.json`: every loan (archived ones
+  too) with its setup, category, reconciled months, skips, catch-up plans,
+  escrow entries and details, and every asset with its value history.
+- **Restore** loads a backup file. You see what's in it (when it was made,
+  which loans) before anything changes, then **Replace with this backup**
+  swaps it in. Restoring replaces everything in the tracker, so first a copy
+  of the current database is saved in `data/` as
+  `*.sqlite.backup-before-restore-<time>` (skipped when the tracker is
+  still empty).
+
+A backup made by an older version of the tracker restores into a newer one;
+it's upgraded on the way in. Loans keep their ids, so a dashboard using
+`?loan=<id>` keeps working after you move to a new install.
+
+What a backup doesn't include: your Actual budget (back it up in Actual,
+*Settings → Export data*), and your `.env` settings and passwords. The file
+is plain JSON and holds what you typed under Details, such as loan and
+policy numbers, so keep it somewhere private.
+
+**Moving to a new machine:** download a backup, install the tracker on the
+new machine, open it, click *Restore a backup* and pick the file.
+
+**From the command line** (for scripts or a nightly backup), run these from
+the `ab-asset-tracker` folder while the tracker is running:
+
+```sh
+# Back up
+docker compose exec -T -u node asset-tracker-backend node dist/server/backup-cli.js export > tracker-backup.json
+
+# Restore (replaces everything, after saving a copy of the current database)
+docker compose exec -T -u node asset-tracker-backend node dist/server/backup-cli.js import < tracker-backup.json
+```
+
+For example, a nightly backup with `crontab -e`:
+
+```
+15 2 * * * cd /path/to/ab-asset-tracker && docker compose exec -T -u node asset-tracker-backend node dist/server/backup-cli.js export > backups/tracker-$(date +\%F).json
+```
+
+(Create the `backups` folder first.)
+
 ---
 
 ## Configuration reference
@@ -664,6 +711,7 @@ The tracker's own data lives in `./data`:
 |---|---|
 | `asset-tracker.sqlite` | Loans, setup, reconciliation, assets. **Back this up.** (Installs from before the rename use `mortgage.sqlite`.) |
 | `*.sqlite.backup-v<N>-<time>` | A copy made automatically before an update changed the database layout. Safe to delete once you're happy. |
+| `*.sqlite.backup-before-restore-<time>` | The data a restore replaced, saved just before it. Safe to delete once you're happy. |
 | `actual-cache/` | A local copy of the budget that the tracker downloads from Actual. Safe to delete; it's downloaded again. |
 
 ### Use a real certificate
@@ -757,8 +805,13 @@ Anyone who can log in to your Actual server through the proxy port. The
 tracker checks every request against Actual's own login.
 
 **How do I back up and restore?**
-To back up, stop the backend so the database is quiet, copy `data/`, and
-start it again:
+Click **Backup** next to the loan tabs, then *Download backup*. To restore,
+pick the file under *Restore* on the same screen. See
+[Backing up and restoring](#backing-up-and-restoring), which also covers the
+command line. Back up Actual separately (*Settings → Export data*).
+
+You can also copy the whole `data/` folder. Stop the backend first so the
+database is quiet:
 
 ```sh
 docker compose stop asset-tracker-backend
@@ -766,8 +819,16 @@ cp -r data /somewhere/safe/tracker-backup
 docker compose start asset-tracker-backend
 ```
 
-To restore, stop the backend, replace `data/` with your copy, and start it
-again. Back up Actual separately (*Settings → Export data*).
+To restore that copy, stop the backend, replace `data/` with it, and start
+it again.
+
+**What are the `.backup-before-restore-...` files in `data/`?**
+The data a restore replaced, saved just before it. To undo a restore, stop
+the backend, move your database (`asset-tracker.sqlite` or
+`mortgage.sqlite`, plus any `-wal` and `-shm` files beside it) out of
+`data/`, copy the `.backup-before-restore-...` file in under the
+database's name, and start the backend again. Delete these files once
+you're happy.
 
 **What are the `.backup-v...` files in `data/`?**
 Automatic copies made before an update changed the database layout. Keep
@@ -1111,9 +1172,10 @@ migration tests load databases made by the last single-loan release
 (`test/fixtures`) and check the migrated loan matches its numbers exactly.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes, and
-[docs/DECISIONS.md](docs/DECISIONS.md) and
-[docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for the reasoning and
-the gaps.
+[docs/DECISIONS.md](docs/DECISIONS.md),
+[docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) and
+[docs/ROADMAP.md](docs/ROADMAP.md) for the reasoning, the gaps, and what's
+planned.
 
 ### Project layout
 
@@ -1169,6 +1231,8 @@ cents.
 | `DELETE /assets/:assetId` | Remove an asset and its values |
 | `POST /assets/:assetId/values` | `{ date, value, source }`: add a value |
 | `DELETE /assets/:assetId/values/:valueId` | Remove a value |
+| `GET /backup` | Everything in the tracker as a backup file (JSON attachment) |
+| `POST /restore?confirm=replace` | Body: a backup file. Replaces everything, after saving a copy of the database |
 
 ## License
 

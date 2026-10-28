@@ -257,18 +257,18 @@ export function currentVersion(db: Database.Database): number {
 }
 
 /**
- * Apply every pending migration. `backup` runs first, once, when there is
- * anything to migrate in a database that already has data in it.
- * Returns the versions applied.
+ * Apply every pending migration up to `upTo`. `backup` runs first, once,
+ * when there is anything to migrate in a database that already has data in
+ * it. Returns the versions applied.
  */
-export function migrate(db: Database.Database, backup?: (fromVersion: number) => void): number[] {
+export function migrate(db: Database.Database, backup?: (fromVersion: number) => void, upTo = LATEST_VERSION): number[] {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_version (
     version     INTEGER PRIMARY KEY,
     description TEXT NOT NULL,
     applied_at  TEXT NOT NULL
   )`);
   const from = currentVersion(db);
-  const pending = MIGRATIONS.filter((m) => m.version > from);
+  const pending = MIGRATIONS.filter((m) => m.version > from && m.version <= upTo);
   if (!pending.length) return [];
   const hasData = db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT IN ('schema_version') AND name NOT LIKE 'sqlite_%' LIMIT 1`).get();
   if (hasData && backup) backup(from);

@@ -44,6 +44,7 @@ import {
   type StartingPoint,
 } from '../engine/index.js';
 import type { BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
+import { BackupError, exportBackup, restoreBackup, type Backup, type RestoreResult } from './backup.js';
 import {
   LOAN_DETAIL_FIELDS,
   LOAN_TYPES,
@@ -945,6 +946,27 @@ export class TrackerService {
     this.assetOr404(assetId);
     if (!this.store.deleteAssetValue(assetId, valueId)) throw new HttpError(404, 'That value is not on file');
     return this.store.getAsset(assetId)!;
+  }
+
+  // --- backup and restore ------------------------------------------------------------------
+
+  /** Everything the tracker holds, as a backup file's contents. */
+  backup(): Backup {
+    return exportBackup(this.store.db);
+  }
+
+  /**
+   * Replace everything in the tracker with a backup. `confirm` has to be
+   * "replace", so a stray request can't do it.
+   */
+  restore(body: unknown, confirm: unknown): RestoreResult {
+    if (confirm !== 'replace') throw new HttpError(400, 'Restoring replaces everything in the tracker. Pass confirm=replace to go ahead.');
+    try {
+      return restoreBackup(this.store, body);
+    } catch (e) {
+      if (e instanceof BackupError) throw new HttpError(400, e.message);
+      throw e;
+    }
   }
 
   // --- read-only summaries ------------------------------------------------------------------

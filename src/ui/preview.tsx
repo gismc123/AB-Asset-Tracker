@@ -378,6 +378,15 @@ function mockClient(empty: boolean): TrackerClient {
       await later(null);
     },
     loan: (id) => find(id).client(),
+    backup: () => {
+      const tables = {
+        loans: loans.map(({ loan: l }) => ({ id: l.id, nickname: l.nickname, type: l.type, created_at: l.createdAt, archived: Number(l.archived) })),
+        assets: loans.flatMap((l) => (l.asset ? [{ id: l.loan.id, loan_id: l.loan.id, name: l.asset.name }] : [])),
+      };
+      const counts = { loans: tables.loans.length, assets: tables.assets.length };
+      return later({ format: 'ab-asset-tracker-backup' as const, formatVersion: 1, schemaVersion: 2, exportedAt: new Date().toISOString(), counts, tables });
+    },
+    restore: () => Promise.reject(new ApiError(0, 'The preview has no server to restore into.')),
   };
 }
 
