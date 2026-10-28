@@ -7,7 +7,7 @@ import { TrackerService } from './service.js';
 import { AUTO_SETUP, FakeSource, MORTGAGE_CATEGORY, SAMPLE_SETUP } from './testing.js';
 
 const GOOD = 'good-token';
-const API = '/mortgage-api';
+const API = '/asset-tracker-api';
 let app: ReturnType<typeof createApp>;
 let source: FakeSource;
 
@@ -40,7 +40,7 @@ describe('HTTP API', () => {
   });
 
   it('serves a harmless inject.js even before the UI is built', async () => {
-    const res = await request(app).get('/mortgage-addon/inject.js');
+    const res = await request(app).get('/asset-tracker-addon/inject.js');
     expect(res.status).toBe(200);
     expect(res.type).toMatch(/javascript/);
   });

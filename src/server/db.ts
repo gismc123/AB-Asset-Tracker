@@ -418,7 +418,22 @@ export class LoanStore {
   }
 }
 
-/** `data/mortgage.sqlite` → `data/mortgage.sqlite.backup-v1-2026-10-28T19-02-37Z` */
+/** The tracker's database file. */
+export const DB_FILE = 'asset-tracker.sqlite';
+/** What the database was called before the project was renamed. */
+export const LEGACY_DB_FILE = 'mortgage.sqlite';
+
+/**
+ * Where the database lives in `dataDir`. An install from before the rename
+ * keeps using its `mortgage.sqlite` in place, so nothing is moved or copied.
+ */
+export function databaseFile(dataDir: string): string {
+  const current = path.join(dataDir, DB_FILE);
+  const legacy = path.join(dataDir, LEGACY_DB_FILE);
+  return !fs.existsSync(current) && fs.existsSync(legacy) ? legacy : current;
+}
+
+/** `data/asset-tracker.sqlite` → `data/asset-tracker.sqlite.backup-v1-2026-10-28T19-02-37Z` */
 export function backupPath(file: string, fromVersion: number, now = new Date()): string {
   const stamp = now.toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-');
   return `${file}.backup-v${fromVersion}-${stamp}`;

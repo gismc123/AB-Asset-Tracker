@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Store } from './db.js';
+import { databaseFile, DB_FILE, LEGACY_DB_FILE, Store } from './db.js';
 import { currentVersion, LATEST_VERSION, migrate } from './migrations.js';
 import { TrackerService } from './service.js';
 import { FakeSource } from './testing.js';
@@ -113,6 +113,16 @@ describe('migrating a single-loan database', () => {
     expect(() => migrate(store.db)).not.toThrow();
     expect(store.db.prepare(`SELECT COUNT(*) AS n FROM months`).get()).toEqual(before);
     store.close();
+  });
+
+  it('keeps using a database from before the rename, and names a new one after the project', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tracker-file-'));
+    dirs.push(dir);
+    expect(databaseFile(dir)).toBe(path.join(dir, DB_FILE));
+    fs.writeFileSync(path.join(dir, LEGACY_DB_FILE), '');
+    expect(databaseFile(dir)).toBe(path.join(dir, LEGACY_DB_FILE));
+    fs.writeFileSync(path.join(dir, DB_FILE), '');
+    expect(databaseFile(dir)).toBe(path.join(dir, DB_FILE));
   });
 
   it('creates an empty, fully migrated database without a backup', () => {

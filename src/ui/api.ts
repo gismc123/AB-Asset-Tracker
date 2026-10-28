@@ -103,7 +103,7 @@ export interface TrackerClient {
   loan(loanId: number): LoanClient;
 }
 
-export function createClient(base = '/mortgage-api', getToken: () => Promise<string | null> = readActualToken): TrackerClient {
+export function createClient(base = '/asset-tracker-api', getToken: () => Promise<string | null> = readActualToken): TrackerClient {
   async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = await getToken();
     if (!token) throw new ApiError(401, 'Log in to Actual to see your loans.');

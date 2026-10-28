@@ -1,4 +1,4 @@
-# The two add-on containers: the mortgage backend and the injecting proxy.
+# The two add-on containers: the tracker backend and the injecting proxy.
 # Neither of them is Actual. Updating Actual never touches these, and
 # rebuilding these never touches Actual.
 #
@@ -7,9 +7,9 @@
 #   docker compose -f compose.existing-actual.yml up -d    (add-on in front of an Actual you already run)
 
 services:
-  mortgage-backend:
+  asset-tracker-backend:
     build: .
-    image: actual-mortgage-tracker-backend:local
+    image: ab-asset-tracker-backend:local
     restart: unless-stopped
     env_file: .env
     environment:
@@ -23,13 +23,13 @@ services:
     expose:
       - ${BACKEND_PORT:-3100}
 
-  mortgage-proxy:
+  asset-tracker-proxy:
     build: ./proxy
-    image: actual-mortgage-tracker-proxy:local
+    image: ab-asset-tracker-proxy:local
     restart: unless-stopped
     environment:
       ACTUAL_UPSTREAM: ${ACTUAL_UPSTREAM:?Set ACTUAL_UPSTREAM in .env}
-      MORTGAGE_BACKEND: http://mortgage-backend:${BACKEND_PORT:-3100}
+      TRACKER_BACKEND: http://asset-tracker-backend:${BACKEND_PORT:-3100}
     volumes:
       # Read-write only so a self-signed pair can be generated on first start
       # when the folder is empty. Existing files are never overwritten.
@@ -37,4 +37,4 @@ services:
     ports:
       - "${PROXY_PORT:-5007}:8443"
     depends_on:
-      - mortgage-backend
+      - asset-tracker-backend

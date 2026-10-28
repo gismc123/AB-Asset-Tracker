@@ -1,11 +1,11 @@
-# Bundled stack: stock Actual + the mortgage add-on.
+# Bundled stack: stock Actual + the AB Asset Tracker add-on.
 #
 #   docker compose up -d            start everything
 #   docker compose pull actual && docker compose up -d actual
 #                                   monthly Actual update (touches nothing else)
 #
 # Open https://<host>:${PROXY_PORT} (default 5007) to use Actual with the
-# Mortgage tab. In .env use:
+# Loans item. In .env use:
 #   ACTUAL_SERVER_URL=http://actual:5006
 #   ACTUAL_UPSTREAM=http://actual:5006
 #   ACTUAL_CA_CERT=          (empty: traffic stays inside the Docker network)

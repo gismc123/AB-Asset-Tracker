@@ -9,18 +9,18 @@
 # list "actual" as a name then verify without disabling TLS checks.
 
 services:
-  mortgage-backend:
+  asset-tracker-backend:
     extends:
       file: compose.addon.yml
-      service: mortgage-backend
+      service: asset-tracker-backend
     extra_hosts:
       - "actual:host-gateway"
 
-  mortgage-proxy:
+  asset-tracker-proxy:
     extends:
       file: compose.addon.yml
-      service: mortgage-proxy
+      service: asset-tracker-proxy
     extra_hosts:
       - "actual:host-gateway"
     depends_on:
-      - mortgage-backend
+      - asset-tracker-backend

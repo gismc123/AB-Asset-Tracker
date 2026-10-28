@@ -1,5 +1,5 @@
 /**
- * Styles for the mortgage screens. They live inside a shadow root, so they
+ * Styles for the loan screens. They live inside a shadow root, so they
  * cannot leak into Actual and Actual's styles cannot leak in. Colors come
  * from Actual's own theme variables (which do cross the shadow boundary),
  * with fallbacks, so the tab follows Actual's light/dark theme.

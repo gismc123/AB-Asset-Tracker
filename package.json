@@ -1,7 +1,7 @@
 {
-  "name": "actual-mortgage-tracker",
+  "name": "ab-asset-tracker",
   "version": "0.1.0",
-  "description": "A Mortgage tab for a stock Actual Budget instance: amortization, PMI drop-off, equity, and monthly reconciliation.",
+  "description": "Loan and asset tracker for a stock Actual Budget server: mortgages, car and personal loans, amortization, equity and monthly reconciliation. Read-only toward Actual.",
   "license": "MIT",
   "private": true,
   "type": "module",

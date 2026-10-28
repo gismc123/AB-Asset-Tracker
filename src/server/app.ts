@@ -18,8 +18,8 @@ export interface AppDeps {
 }
 
 /** Mount points shared with the proxy config. */
-export const API_PREFIX = '/mortgage-api';
-export const ADDON_PREFIX = '/mortgage-addon';
+export const API_PREFIX = '/asset-tracker-api';
+export const ADDON_PREFIX = '/asset-tracker-addon';
 
 function sameToken(given: string | undefined, expected: string): boolean {
   if (!given) return false;
@@ -49,7 +49,7 @@ export function createApp(deps: AppDeps) {
     const file = path.join(deps.uiDir, 'inject.js');
     if (!fs.existsSync(file)) {
       // Serve a harmless no-op so Actual keeps working even if the build is missing.
-      res.type('application/javascript').send('console.warn("[mortgage] add-on UI is not built");');
+      res.type('application/javascript').send('console.warn("[asset-tracker] add-on UI is not built");');
       return;
     }
     // COEP require-corp on Actual's page: same-origin is fine, but be explicit.
@@ -80,7 +80,7 @@ export function createApp(deps: AppDeps) {
       res.set('Warning', '299 - "The token query parameter is deprecated; send Authorization: Bearer <token>"');
       if (!warnedQueryToken) {
         warnedQueryToken = true;
-        console.warn('[mortgage] a dashboard passed the summary token as ?token=. Switch it to the Authorization: Bearer header.');
+        console.warn('[asset-tracker] a dashboard passed the summary token as ?token=. Switch it to the Authorization: Bearer header.');
       }
     }
     res.set('Cache-Control', 'no-store');
@@ -219,7 +219,7 @@ export function createApp(deps: AppDeps) {
       res.status(400).json({ error: 'Request body is not valid JSON' });
       return;
     }
-    console.error('[mortgage] unexpected error', err);
+    console.error('[asset-tracker] unexpected error', err);
     res.status(500).json({ error: 'Something went wrong in the tracker. Check its logs.' });
   });
 
