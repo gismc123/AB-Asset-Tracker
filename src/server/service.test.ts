@@ -147,7 +147,7 @@ describe('reconciliation flow', () => {
     await service.match(1, { transactionId: 't1' });
     await expectHttp(() => service.resolve(1, { resolution: 'rounding' }), 400);
     expect(row(1).status).toBe('flagged');
-    expect(store.listAdjustments()).toHaveLength(0);
+    expect(store.loan(1).listAdjustments()).toHaveLength(0);
   });
 
   it('undo removes the match and the adjustments it created', async () => {
@@ -157,7 +157,7 @@ describe('reconciliation flow', () => {
     service.unmatch(1);
     expect(row(1).status).toBe('scheduled');
     expect(row(2).escrow).toBe(41_250);
-    expect(store.listAdjustments()).toHaveLength(0);
+    expect(store.loan(1).listAdjustments()).toHaveLength(0);
   });
 
   it('will not reuse one transaction for two months', async () => {
@@ -209,7 +209,7 @@ describe('skipped payments', () => {
     service.skip(2, { mode: 'capitalize' });
     const s = service.skip(2, { mode: 'defer' });
     expect(s.schedule!.rows[1]!.skipped).toBe('defer');
-    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'skip')).toHaveLength(1);
+    expect(store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'skip')).toHaveLength(1);
   });
 
   it('refuses bad modes, matched months, and matching a skipped month', async () => {
@@ -225,7 +225,7 @@ describe('skipped payments', () => {
 
   it('survives a reopen (the skip mode is stored)', () => {
     service.skip(3, { mode: 'defer' });
-    expect(store.listAdjustments().at(-1)!.adjustment).toEqual({ kind: 'skip', payment: 3, mode: 'defer' });
+    expect(store.loan(1).listAdjustments().at(-1)!.adjustment).toEqual({ kind: 'skip', payment: 3, mode: 'defer' });
   });
 });
 
@@ -300,12 +300,12 @@ describe('catch-up plans', () => {
 
     // Changing the plan replaces it.
     service.setCatchUpPlan(2, { fromPayment: 6, months: 3 });
-    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
+    expect(store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
 
     service.unskip(2);
-    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
+    expect(store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
     service.unskip(3);
-    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(0);
+    expect(store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(0);
   });
 
   it('validates the plan', async () => {

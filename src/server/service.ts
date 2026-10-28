@@ -31,7 +31,7 @@ import {
   type StartingPoint,
 } from '../engine/index.js';
 import type { BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
-import { LOAN_DETAIL_FIELDS, type LoanDetails, type MonthRecord, type Settings, type Store, type StoredAdjustment, type StoredHomeValue } from './db.js';
+import { LOAN_DETAIL_FIELDS, type LoanDetails, type LoanStore, type MonthRecord, type Settings, type Store, type StoredAdjustment, type StoredAssetValue } from './db.js';
 
 export class HttpError extends Error {
   constructor(
@@ -67,7 +67,7 @@ export interface StateView {
   } | null;
   summary: LoanSummary | null;
   adjustments: StoredAdjustment[];
-  homeValues: StoredHomeValue[];
+  homeValues: StoredAssetValue[];
   details: LoanDetails;
   analysis: {
     equity: EquityAnalysis;
@@ -197,11 +197,27 @@ function suggestionsFor(difference: Cents): Resolution[] {
 }
 
 export class MortgageService {
+  private readonly store: LoanStore;
+
   constructor(
-    private readonly store: Store,
+    private readonly root: Store,
     private readonly source: BudgetSource,
     private readonly today: () => ISODate,
-  ) {}
+    private readonly loanId = 1,
+  ) {
+    this.store = root.loan(loanId);
+  }
+
+  private homeValues(): StoredAssetValue[] {
+    return this.root.assetForLoan(this.loanId)?.values ?? [];
+  }
+
+  /** The loan record, created on first save for a database that has none yet. */
+  private ensureLoan() {
+    if (!this.root.getLoan(this.loanId)) {
+      this.root.db.prepare(`INSERT INTO loans (id, nickname, type, created_at, archived) VALUES (?, 'Mortgage', 'mortgage', ?, 0)`).run(this.loanId, new Date().toISOString());
+    }
+  }
 
   private requireSetup(): LoanSetup {
     const setup = this.store.getSetup();
@@ -247,7 +263,7 @@ export class MortgageService {
       source: this.source.status(),
       today: this.today(),
       adjustments: this.store.listAdjustments(),
-      homeValues: this.store.listHomeValues(),
+      homeValues: this.homeValues(),
       details: this.store.getDetails(),
     };
     if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
@@ -303,7 +319,7 @@ export class MortgageService {
   /** Read-only snapshot for dashboards. Null when the loan is not set up. */
   summary(): LoanSummary | null {
     const setup = this.store.getSetup();
-    return setup ? summarize(setup, this.build(setup), this.paidSet(), this.today(), this.store.listHomeValues()) : null;
+    return setup ? summarize(setup, this.build(setup), this.paidSet(), this.today(), this.homeValues()) : null;
   }
 
   saveSetup(body: unknown) {
@@ -323,13 +339,17 @@ export class MortgageService {
       }
     }
     this.build(setup); // throws a readable 400 if the schedule cannot be generated
-    this.store.saveSetup(setup);
+    this.root.transaction(() => {
+      this.ensureLoan();
+      this.store.saveSetup(setup);
+    });
     return this.state();
   }
 
   saveSettings(body: unknown) {
     const b = (body ?? {}) as Record<string, unknown>;
     const categoryId = typeof b.categoryId === 'string' && b.categoryId ? b.categoryId : null;
+    this.ensureLoan();
     this.store.saveSettings({ ...this.store.getSettings(), categoryId });
     return this.store.getSettings();
   }
@@ -391,7 +411,7 @@ export class MortgageService {
 
     const cmp = compareToSchedule(row, txn.amount);
     // Re-matching a flagged month to a different transaction starts it over.
-    this.store.transaction(() => {
+    this.root.transaction(() => {
       this.store.deleteAdjustmentsFrom(payment);
       this.store.saveMonth({
         payment,
@@ -426,7 +446,7 @@ export class MortgageService {
     const month = this.store.getMonth(payment);
     if (!month || month.status !== 'flagged') throw new HttpError(409, `Payment ${payment} is not flagged`);
 
-    this.store.transaction(() => {
+    this.root.transaction(() => {
       const before = this.build(setup);
       const row = this.row(before, payment);
       const difference = month.transactionAmount - row.total;
@@ -457,7 +477,7 @@ export class MortgageService {
   }
 
   unmatch(payment: number) {
-    this.store.transaction(() => {
+    this.root.transaction(() => {
       this.store.deleteAdjustmentsFrom(payment);
       this.store.deleteMonth(payment);
     });
@@ -474,7 +494,7 @@ export class MortgageService {
     if (this.store.getMonth(payment)?.status === 'paid') {
       throw new HttpError(409, `Payment ${payment} is reconciled and locked. Undo it first.`);
     }
-    this.store.transaction(() => {
+    this.root.transaction(() => {
       this.store.deleteManualOffset(payment);
       if (amount !== 0) this.store.addAdjustment({ kind: 'pennyOffset', payment, amount: amount as number }, null);
     });
@@ -491,7 +511,7 @@ export class MortgageService {
     if (this.store.getMonth(payment)) {
       throw new HttpError(409, `Payment ${payment} is already matched to a bank transaction. Undo that first.`);
     }
-    this.store.transaction(() => {
+    this.root.transaction(() => {
       this.store.setSkip(payment, mode);
       this.dropUnusedCatchUpPlans();
     });
@@ -499,7 +519,7 @@ export class MortgageService {
   }
 
   unskip(payment: number) {
-    this.store.transaction(() => {
+    this.root.transaction(() => {
       this.store.setSkip(payment, null);
       this.dropUnusedCatchUpPlans();
     });
@@ -560,7 +580,7 @@ export class MortgageService {
       if (months_.has(k)) throw new HttpError(409, `Payment ${k} is already matched to a bank transaction, so the plan can't include it`);
       if (schedule.rows[k - 1]!.skipped) throw new HttpError(409, `Payment ${k} is skipped, so the plan can't include it`);
     }
-    this.store.transaction(() => {
+    this.root.transaction(() => {
       const existing = this.coveringPlan(payment);
       if (existing) this.store.deleteAdjustment(existing.id);
       for (const a of this.store.listAdjustments()) {
@@ -581,12 +601,23 @@ export class MortgageService {
 
   addHomeValue(body: unknown) {
     const b = bodyOf(body);
-    this.store.addHomeValue({ date: dateField(b, 'date'), value: amountField(b, 'value'), source: textField(b, 'source', 100) || 'Estimate' });
+    const value = { date: dateField(b, 'date'), value: amountField(b, 'value'), source: textField(b, 'source', 100) || 'Estimate' };
+    this.root.transaction(() => {
+      this.ensureLoan();
+      const asset =
+        this.root.assetForLoan(this.loanId) ??
+        this.root.createAsset({
+          loanId: this.loanId, name: 'Home', kind: 'home', originalValue: this.store.getSetup()?.originalHomeValue ?? 0,
+          valueTrend: 'manual', trendRatePercent: null, acquiredDate: null,
+        });
+      this.root.addAssetValue(asset.id, value);
+    });
     return this.state();
   }
 
   deleteHomeValue(id: number) {
-    if (!this.store.deleteHomeValue(id)) throw new HttpError(404, 'That home value is not on file');
+    const asset = this.root.assetForLoan(this.loanId);
+    if (!asset || !this.root.deleteAssetValue(asset.id, id)) throw new HttpError(404, 'That home value is not on file');
     return this.state();
   }
 
@@ -595,6 +626,7 @@ export class MortgageService {
   addEscrowEntry(body: unknown) {
     const b = bodyOf(body);
     if (!isEscrowKind(b.kind)) throw new HttpError(400, 'Unknown escrow entry kind');
+    this.ensureLoan();
     this.store.addEscrowEntry({ date: dateField(b, 'date'), kind: b.kind, amount: amountField(b, 'amount'), note: textField(b, 'note', 200) });
     return this.state();
   }
@@ -607,6 +639,7 @@ export class MortgageService {
   // --- loan details ------------------------------------------------------------------
 
   saveDetails(body: unknown) {
+    this.ensureLoan();
     this.store.saveDetails(parseDetails(body));
     return this.state();
   }

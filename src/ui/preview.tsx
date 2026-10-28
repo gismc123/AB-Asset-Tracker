@@ -18,7 +18,7 @@ import {
   type LoanSetup,
   type LockedPayment,
 } from '../engine/index.js';
-import type { LoanDetails, StoredHomeValue } from '../server/db.js';
+import type { LoanDetails, StoredAssetValue } from '../server/db.js';
 import type { MonthView, StateView } from '../server/service.js';
 import { ApiError, type Candidate, type MortgageClient } from './api.js';
 import { mountMortgageApp } from './mount.js';
@@ -54,7 +54,7 @@ function mockClient(empty: boolean): MortgageClient {
   const months = new Map<number, Month>();
   const txns: Candidate[] = [];
   // Made-up sample records.
-  const homeValues: StoredHomeValue[] = empty ? [] : [{ id: 1, date: '2025-09-01', value: 36_800_000, source: 'Online estimate' }];
+  const homeValues: StoredAssetValue[] = empty ? [] : [{ id: 1, date: '2025-09-01', value: 36_800_000, source: 'Online estimate' }];
   const escrow: EscrowEntry[] = empty
     ? []
     : [
