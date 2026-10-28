@@ -1,8 +1,9 @@
-import { latestHomeValue, settledRows, type HomeValueEstimate } from './summary.js';
+import { currentValue, hasProjection, homeAssetFor, projectedValue, type Asset } from './assets.js';
+import { settledRows } from './summary.js';
 import type { Cents, ISODate, LoanSetup, Schedule } from './types.js';
 
 export interface EquityMilestone {
-  /** Equity as a percent of the home value. */
+  /** Equity as a percent of the asset's value. 0 means owing less than it's worth. */
   percent: number;
   reached: boolean;
   /** First scheduled payment that gets there, if not reached yet. */
@@ -15,11 +16,13 @@ export interface EquityPoint {
   dueDate: ISODate;
   /** Balance plus any deferred amount still owed after this payment. */
   owed: Cents;
+  /** The asset's value at that point: today's value, or the projected curve ahead. */
+  value: Cents;
   equity: Cents;
 }
 
 export interface EquityAnalysis {
-  /** Latest estimate, or the original home value when there is none. */
+  /** Latest value entered, or the asset's original value when there is none. */
   homeValue: Cents;
   homeValueAsOf: ISODate | null;
   homeValueSource: string;
@@ -35,8 +38,10 @@ export interface EquityAnalysis {
   ltv: number;
   /** How the equity was built. The parts add up to `equity`. */
   parts: {
-    /** Down payment: original home value minus the amount borrowed. */
+    /** The asset's original value minus the amount borrowed (the down payment, for most loans). */
     startingEquity: Cents;
+    /** The down payment from the setup, when entered. Part of `startingEquity`. */
+    downPayment: Cents | null;
     /** Regular principal paid so far. */
     principalPaid: Cents;
     extraPrincipal: Cents;
@@ -48,9 +53,11 @@ export interface EquityAnalysis {
     extraBeforeTracking: Cents;
     /** Skipped payments: interest added, or payments deferred or past due (zero or negative). */
     skipped: Cents;
-    /** Home value change since purchase (zero without an estimate). */
+    /** Value change since purchase (zero without an estimate). */
     marketChange: Cents;
   };
+  /** True when future points follow a projected value curve rather than today's value. */
+  projected: boolean;
   milestones: EquityMilestone[];
   /** Equity after every payment on the schedule, at today's home value. */
   projection: EquityPoint[];
@@ -58,22 +65,29 @@ export interface EquityAnalysis {
   settledIndex: number;
 }
 
-const MILESTONES = [20, 22, 25, 50, 75, 100];
+/** Homes: the PMI-related lines and round numbers. Anything else: owing less than it's worth, then round numbers. */
+const HOME_MILESTONES = [20, 22, 25, 50, 75, 100];
+const OTHER_MILESTONES = [0, 25, 50, 75, 100];
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 10_000) / 100 : 0);
 
 /**
  * Equity today and how it was built, plus when the schedule reaches common
- * equity milestones. Future points assume the home keeps today's value.
+ * equity milestones. Future points keep today's value, or follow the
+ * asset's projected curve when it has one. `asset` defaults to the home
+ * described by the setup (how every loan worked before assets).
  */
 export function analyzeEquity(
   setup: LoanSetup,
   schedule: Schedule,
   paid: ReadonlySet<number>,
   today: ISODate,
-  homeValues: readonly HomeValueEstimate[] = [],
+  asset: Asset = homeAssetFor(setup),
 ): EquityAnalysis {
-  const estimate = latestHomeValue(homeValues);
-  const homeValue = estimate?.value ?? setup.originalHomeValue;
+  const current = currentValue(asset);
+  const estimate = current.entered ? current : null;
+  const homeValue = current.value;
+  const projected = hasProjection(asset);
+  const valueAt = (date: ISODate) => (projected && date > today ? projectedValue(asset, date, setup.openDate) : homeValue);
   const settled = settledRows(schedule.rows, paid, today);
   const settledSet = new Set(settled.map((r) => r.payment));
 
@@ -87,7 +101,8 @@ export function analyzeEquity(
     owedExtra.push({ deferred, pastDue });
     if (settledSet.has(r.payment)) settledIndex = i;
     const owed = r.endingBalance + deferred + pastDue;
-    return { payment: r.payment, dueDate: r.dueDate, owed, equity: homeValue - owed };
+    const value = valueAt(r.dueDate);
+    return { payment: r.payment, dueDate: r.dueDate, owed, value, equity: value - owed };
   });
 
   const last = settledIndex >= 0 ? projection[settledIndex]! : null;
@@ -105,23 +120,22 @@ export function analyzeEquity(
     if (r.beforeTracking) extraBeforeTracking += r.extraPrincipal;
     else extraPrincipal += r.extraPrincipal;
   }
-  const startingEquity = setup.originalHomeValue - setup.originalAmount;
-  const marketChange = homeValue - setup.originalHomeValue;
+  const startingEquity = asset.originalValue - setup.originalAmount;
+  const marketChange = homeValue - asset.originalValue;
   // Whatever the paid principal doesn't explain comes from skipped months.
   const skipped = equity - (startingEquity + principalPaid + extraPrincipal + extraBeforeTracking + marketChange);
 
   const equityPercent = pct(equity, homeValue);
-  const milestones = MILESTONES.map((percent): EquityMilestone => {
+  const milestones = (asset.kind === 'home' ? HOME_MILESTONES : OTHER_MILESTONES).map((percent): EquityMilestone => {
     if (equityPercent >= percent) return { percent, reached: true, payment: null, dueDate: null };
-    const target = homeValue * (percent / 100);
-    const hit = projection.slice(settledIndex + 1).find((p) => p.equity >= target - 0.5);
+    const hit = projection.slice(settledIndex + 1).find((p) => p.equity >= p.value * (percent / 100) - 0.5);
     return { percent, reached: false, payment: hit?.payment ?? null, dueDate: hit?.dueDate ?? null };
   });
 
   return {
     homeValue,
     homeValueAsOf: estimate?.date ?? null,
-    homeValueSource: estimate?.source ?? 'Original home value',
+    homeValueSource: estimate?.source ?? (asset.kind === 'home' ? 'Original home value' : 'Original value'),
     isEstimate: estimate !== null,
     balance,
     deferredBalance: settledIndex >= 0 ? owedExtra[settledIndex]!.deferred : 0,
@@ -130,7 +144,8 @@ export function analyzeEquity(
     equity,
     equityPercent,
     ltv: pct(owed, homeValue),
-    parts: { startingEquity, principalPaid, extraPrincipal, extraBeforeTracking, skipped, marketChange },
+    parts: { startingEquity, downPayment: setup.downPayment ?? null, principalPaid, extraPrincipal, extraBeforeTracking, skipped, marketChange },
+    projected,
     milestones,
     projection,
     settledIndex,

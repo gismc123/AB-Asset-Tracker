@@ -7,6 +7,7 @@ import {
   isValidISODate,
   periodBreakouts,
   generateSchedule,
+  homeAssetFor,
   lockRow,
   MAX_PENNY_OFFSET,
   resolutionToAdjustment,
@@ -14,6 +15,7 @@ import {
   SetupError,
   summarize,
   validateSetup,
+  type Asset,
   type Cents,
   type EquityAnalysis,
   type EscrowReport,
@@ -208,6 +210,11 @@ export class MortgageService {
     this.store = root.loan(loanId);
   }
 
+  /** The asset equity is measured against; until one is recorded, the home from the setup. */
+  private asset(setup: LoanSetup): Asset {
+    return this.root.assetForLoan(this.loanId) ?? homeAssetFor(setup);
+  }
+
   private homeValues(): StoredAssetValue[] {
     return this.root.assetForLoan(this.loanId)?.values ?? [];
   }
@@ -300,9 +307,9 @@ export class MortgageService {
         rows,
         currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null,
       },
-      summary: summarize(setup, schedule, paid, today, base.homeValues),
+      summary: summarize(setup, schedule, paid, today, this.asset(setup)),
       analysis: {
-        equity: analyzeEquity(setup, schedule, paid, today, base.homeValues),
+        equity: analyzeEquity(setup, schedule, paid, today, this.asset(setup)),
         periods: {
           paid: periodBreakouts(schedule.rows, paidOn, today, 'paid'),
           scheduled: periodBreakouts(schedule.rows, paidOn, today, 'scheduled'),
@@ -319,7 +326,7 @@ export class MortgageService {
   /** Read-only snapshot for dashboards. Null when the loan is not set up. */
   summary(): LoanSummary | null {
     const setup = this.store.getSetup();
-    return setup ? summarize(setup, this.build(setup), this.paidSet(), this.today(), this.homeValues()) : null;
+    return setup ? summarize(setup, this.build(setup), this.paidSet(), this.today(), this.asset(setup)) : null;
   }
 
   saveSetup(body: unknown) {

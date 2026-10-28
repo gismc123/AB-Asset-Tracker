@@ -12,6 +12,8 @@ export interface PeriodTotals {
   interest: Cents;
   pmi: Cents;
   escrow: Cents;
+  /** Yearly fees. */
+  fees: Cents;
   /** Deferred (skipped) payments repaid with the final payment. */
   deferredRepaid: Cents;
   /**
@@ -19,7 +21,7 @@ export interface PeriodTotals {
    * and escrow above; shown separately for reference.
    */
   catchUp: Cents;
-  /** Everything paid: principal + extra + interest + PMI + escrow + deferred repaid. */
+  /** Everything paid: principal + extra + interest + PMI + escrow + fees + deferred repaid. */
   total: Cents;
   /** Payments made (skipped months not counted). */
   payments: number;
@@ -60,6 +62,7 @@ export function emptyTotals(): PeriodTotals {
     interest: 0,
     pmi: 0,
     escrow: 0,
+    fees: 0,
     deferredRepaid: 0,
     catchUp: 0,
     total: 0,
@@ -83,6 +86,7 @@ function add(t: PeriodTotals, r: ScheduleRow) {
   t.interest += r.interest + (c?.interest ?? 0);
   t.pmi += r.pmi + (c?.pmi ?? 0);
   t.escrow += r.escrow + (c?.escrow ?? 0);
+  t.fees += r.fee;
   t.deferredRepaid += r.deferredRepaid;
   t.catchUp += c?.total ?? 0;
   t.total += r.total;

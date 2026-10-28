@@ -191,7 +191,7 @@ export function summaryForDisplay(s: LoanSummary) {
     pastDue: dollars(s.pastDue),
     scheduledBalance: dollars(s.scheduledBalance),
     percentPaid: s.percentPaid,
-    equity: dollars(s.equity),
+    equity: s.equity === null ? null : dollars(s.equity),
     equityPercent: s.equityPercent,
     homeValue: s.homeValue ? { value: dollars(s.homeValue.value), asOf: s.homeValue.date } : null,
     marketEquity: s.marketEquity === null ? null : dollars(s.marketEquity),

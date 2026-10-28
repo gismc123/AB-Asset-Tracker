@@ -51,8 +51,10 @@ describe('migrating a single-loan database', () => {
       const store = new Store(file, { onBackup: (f) => backups.push(f) });
       const service = new MortgageService(store, sourceFor(name), () => TODAY[name]);
 
-      expect(service.state()).toEqual(golden(`${name}.state`));
-      expect(service.summary()).toEqual(golden(`${name}.summary`));
+      // Every field the old release returned must come back unchanged. New
+      // fields (fees, assets, payoff) may be added alongside.
+      expect(service.state()).toMatchObject(golden(`${name}.state`));
+      expect(service.summary()).toMatchObject(golden(`${name}.summary`));
 
       expect(store.listLoans()).toMatchObject([{ id: 1, nickname: 'Mortgage', type: 'mortgage', archived: false }]);
       const asset = store.assetForLoan(1)!;

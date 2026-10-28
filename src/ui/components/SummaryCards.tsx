@@ -47,8 +47,8 @@ export function SummaryCards({ summary }: { summary: LoanSummary }) {
           </>
         ) : (
           <>
-            <div className="mt-kpi-value"><Amt cents={summary.equity} whole /></div>
-            <div className="mt-kpi-note">{percent(summary.equityPercent)} of original home value</div>
+            <div className="mt-kpi-value"><Amt cents={summary.equity ?? 0} whole /></div>
+            <div className="mt-kpi-note">{percent(summary.equityPercent ?? 0)} of original home value</div>
           </>
         )}
       </div>

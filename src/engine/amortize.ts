@@ -1,8 +1,10 @@
-import { dueDateFor, isValidISODate } from './dates.js';
-import { monthlyInterest, roundCents, standardPayment } from './money.js';
+import { daysBetween, dueDateFor, isValidISODate } from './dates.js';
+import { dailyInterest, monthlyInterest, roundCents, standardPayment } from './money.js';
 import type {
   Adjustment,
   Cents,
+  ISODate,
+  LoanModules,
   LoanSetup,
   LockedPayment,
   PmiInfo,
@@ -20,7 +22,24 @@ export interface GenerateOptions {
   adjustments?: readonly Adjustment[];
   /** Reconciled months, keyed by payment number. Their amounts are used as-is. */
   locked?: ReadonlyMap<number, LockedPayment>;
+  /**
+   * When each matched payment really left the bank. Only daily-interest loans
+   * use it: interest runs up to the date the payment was made.
+   */
+  paidDates?: ReadonlyMap<number, ISODate>;
 }
+
+/** Loans saved before modules existed were all mortgages, with both. */
+export function modulesOf(setup: LoanSetup): LoanModules {
+  return { pmi: setup.modules?.pmi ?? true, escrow: setup.modules?.escrow ?? true };
+}
+
+export function termMonthsOf(setup: LoanSetup): number {
+  return setup.termMonths ?? setup.termYears * 12;
+}
+
+/** Longest term accepted, in months. */
+export const MAX_TERM_MONTHS = 600;
 
 export class SetupError extends Error {
   constructor(public readonly problems: string[]) {
@@ -36,7 +55,12 @@ export function validateSetup(s: LoanSetup): string[] {
   if (!(typeof s.annualRatePercent === 'number' && s.annualRatePercent >= 0 && s.annualRatePercent < 50)) {
     problems.push('Interest rate must be between 0 and 50 percent');
   }
-  if (!(Number.isInteger(s.termYears) && s.termYears >= 1 && s.termYears <= 50)) problems.push('Term must be 1 to 50 whole years');
+  const term = termMonthsOf(s);
+  if (s.termMonths !== undefined && s.termMonths !== null) {
+    if (!(Number.isInteger(s.termMonths) && s.termMonths >= 1 && s.termMonths <= MAX_TERM_MONTHS)) {
+      problems.push(`Term must be 1 to ${MAX_TERM_MONTHS} months`);
+    }
+  } else if (!(Number.isInteger(s.termYears) && s.termYears >= 1 && s.termYears <= 50)) problems.push('Term must be 1 to 50 whole years');
   if (!isValidISODate(s.openDate)) problems.push('Loan open date is not a valid date');
   if (!isValidISODate(s.firstPaymentDate)) problems.push('First payment date is not a valid date');
   if (isValidISODate(s.openDate) && isValidISODate(s.firstPaymentDate) && s.openDate > s.firstPaymentDate) {
@@ -46,7 +70,9 @@ export function validateSetup(s: LoanSetup): string[] {
   if (s.piPaymentOverride !== null && (!isCents(s.piPaymentOverride) || s.piPaymentOverride <= 0)) {
     problems.push('P&I override must be more than zero, or empty to use the calculated payment');
   }
-  if (!isCents(s.originalHomeValue) || s.originalHomeValue <= 0) problems.push('Original home value must be more than zero');
+  const modules = modulesOf(s);
+  if (modules.pmi && (!isCents(s.originalHomeValue) || s.originalHomeValue <= 0)) problems.push('Original home value must be more than zero');
+  if (!modules.pmi && !isCents(s.originalHomeValue)) problems.push('Original home value must be zero or more');
   if (!isCents(s.pmiMonthly)) problems.push('Monthly PMI must be zero or more');
   if (s.pmiStartDate !== null && !isValidISODate(s.pmiStartDate)) problems.push('PMI start date is not a valid date');
   if (!['auto78Scheduled', 'auto78Actual', 'request80'].includes(s.pmiRemovalRule)) problems.push('Unknown PMI removal rule');
@@ -54,13 +80,40 @@ export function validateSetup(s: LoanSetup): string[] {
   if (!isCents(s.extraPrincipal)) problems.push('Extra principal must be zero or more');
   const start = s.startingPoint;
   if (start) {
-    if (!(Number.isInteger(start.payment) && start.payment >= 1 && (!Number.isInteger(s.termYears) || start.payment < s.termYears * 12))) {
+    if (!(Number.isInteger(start.payment) && start.payment >= 1 && (!Number.isInteger(term) || start.payment < term))) {
       problems.push('Tracking has to start after a payment within the term');
     }
     if (!isCents(start.balance) || start.balance <= 0) problems.push('The balance when tracking starts must be more than zero');
     else if (isCents(s.originalAmount) && start.balance > s.originalAmount) {
       problems.push('The balance when tracking starts can\'t be more than the original loan amount');
     }
+  }
+  if (s.modules !== undefined && !(typeof s.modules === 'object' && typeof s.modules.pmi === 'boolean' && typeof s.modules.escrow === 'boolean')) {
+    problems.push('Modules must say whether PMI and escrow are on');
+  }
+  if (s.interestMethod !== undefined && s.interestMethod !== 'monthly' && s.interestMethod !== 'daily') {
+    problems.push('Interest method must be monthly or daily');
+  }
+  if (s.downPayment !== undefined && s.downPayment !== null && !isCents(s.downPayment)) problems.push('Down payment must be zero or more');
+  if (s.fees !== undefined) {
+    if (!Array.isArray(s.fees) || s.fees.length > 20) problems.push('Keep one-off fees to 20 or fewer');
+    else {
+      for (const f of s.fees) {
+        if (!f || typeof f.label !== 'string' || !f.label.trim() || f.label.length > 80) problems.push('Every fee needs a name of up to 80 characters');
+        else if (!isCents(f.amount)) problems.push(`Fee "${f.label}" must be zero or more`);
+        else if (typeof f.financed !== 'boolean') problems.push(`Fee "${f.label}" must say whether it was financed`);
+      }
+    }
+  }
+  const yf = s.yearlyFee;
+  if (yf !== undefined && yf !== null) {
+    if (yf.basis !== 'original' && yf.basis !== 'balance') problems.push('The yearly fee is a percent of the original amount or of the balance');
+    if (!(typeof yf.percent === 'number' && yf.percent >= 0 && yf.percent <= 20)) problems.push('The yearly fee must be 0 to 20 percent');
+  }
+  const quote = s.payoffQuote;
+  if (quote !== undefined && quote !== null) {
+    if (!isCents(quote.amount) || quote.amount <= 0) problems.push('The payoff quote must be more than zero');
+    if (!isValidISODate(quote.goodThrough)) problems.push('The payoff quote needs a valid "good through" date');
   }
   return problems;
 }
@@ -167,6 +220,31 @@ function applyCatchUp(rows: ScheduleRow[], adjustments: readonly Adjustment[]) {
   }
 }
 
+/**
+ * Charge the yearly fee with the first payment of each loan year. A fee
+ * that falls on a skipped month moves to the next payment that is made; a
+ * reconciled month keeps whatever fee it was locked with.
+ */
+function applyYearlyFee(rows: ScheduleRow[], setup: LoanSetup) {
+  const fee = setup.yearlyFee;
+  if (!fee || !(fee.percent > 0)) return;
+  let pending = 0;
+  for (const row of rows) {
+    if ((row.payment - 1) % 12 === 0) {
+      const basis = fee.basis === 'balance' ? row.beginningBalance : setup.originalAmount;
+      pending += roundCents((basis * fee.percent) / 100);
+    }
+    if (row.locked) {
+      pending = Math.max(0, pending - row.fee);
+      continue;
+    }
+    if (row.skipped || pending === 0) continue;
+    row.fee = pending;
+    row.total += pending;
+    pending = 0;
+  }
+}
+
 export function standingExtraAt(setup: LoanSetup, adjustments: readonly Adjustment[], k: number): Cents {
   return valueFrom(adjustments, 'standingExtra', k, setup.extraPrincipal).amount;
 }
@@ -178,13 +256,20 @@ function amortize(
   adjustments: readonly Adjustment[],
   locked: ReadonlyMap<number, LockedPayment>,
   withExtras: boolean,
+  paidDates: ReadonlyMap<number, ISODate> = new Map(),
 ): ScheduleRow[] {
   const rows: ScheduleRow[] = [];
-  const termMonths = setup.termYears * 12;
+  const termMonths = termMonthsOf(setup);
+  const escrowOn = modulesOf(setup).escrow;
+  const daily = setup.interestMethod === 'daily';
   // The original schedule knows nothing of what happened before tracking.
   const start = withExtras ? (setup.startingPoint ?? null) : null;
   let balance = setup.originalAmount;
   let deferredBalance = 0;
+  // Daily interest runs from the previous payment's date (the open date for the first).
+  let lastDate = setup.openDate;
+  let capitalizedSkips = 0;
+  const escrowAt = (k: number) => (escrowOn ? valueFrom(adjustments, 'escrow', k, setup.escrowMonthly).amount : 0);
 
   for (let k = 1; balance > 0; k++) {
     if (k > MAX_PAYMENTS) {
@@ -192,13 +277,17 @@ function amortize(
     }
     const dueDate = dueDateFor(setup.firstPaymentDate, setup.paymentDay, k);
     const lock = locked.get(k);
+    const periodEnd = (withExtras && paidDates.get(k)) || dueDate;
+    const periodStart = lastDate;
+    lastDate = periodEnd;
 
     if (lock) {
       const principal = Math.min(lock.principal, balance);
-      // Locks saved before skips existed lack the skip fields.
+      // Locks saved before skips or fees existed lack those fields.
       rows.push({
         ...NOT_SKIPPED,
         ...lock,
+        fee: (lock.fee as Cents | undefined) ?? 0,
         payment: k,
         dueDate,
         beginningBalance: balance,
@@ -214,7 +303,9 @@ function amortize(
     // Before tracking, payments follow the original schedule: no skips, offsets or extras.
     const beforeTracking = start !== null && k <= start.payment;
     const skip = withExtras && !beforeTracking ? skipAt(adjustments, k) : null;
-    const interest = monthlyInterest(balance, setup.annualRatePercent);
+    const interest = daily
+      ? dailyInterest(balance, setup.annualRatePercent, Math.max(0, daysBetween(periodStart, periodEnd)))
+      : monthlyInterest(balance, setup.annualRatePercent);
     const empty = {
       payment: k,
       dueDate,
@@ -223,6 +314,7 @@ function amortize(
       pennyOffset: 0,
       pmi: 0,
       escrow: 0,
+      fee: 0,
       total: 0,
       locked: false,
       beforeTracking: false,
@@ -241,6 +333,7 @@ function amortize(
         capitalizedInterest: interest,
       });
       balance += interest;
+      capitalizedSkips++;
       continue;
     }
 
@@ -256,13 +349,17 @@ function amortize(
     // instead of creating a tiny extra one. Only a small residue: after a
     // skipped payment the loan genuinely runs longer.
     if (k >= termMonths && balance - scheduledPrincipal <= Math.max(100, Math.round(pi * 0.02))) scheduledPrincipal = balance;
+    // Daily interest makes the residue depend on the calendar, so the
+    // scheduled last payment always settles the loan (later if interest was
+    // added by skips).
+    if (daily && k >= termMonths + capitalizedSkips) scheduledPrincipal = balance;
 
     if (skip === 'defer' || skip === 'catchUp') {
       // The balance moves as if this installment were paid; what's missed is
       // tracked separately (deferred to payoff, or past due until caught up).
       const missedPi = scheduledPrincipal + interest;
       const catchUp = skip === 'catchUp';
-      const escrow = catchUp ? valueFrom(adjustments, 'escrow', k, setup.escrowMonthly).amount : 0;
+      const escrow = catchUp ? escrowAt(k) : 0;
       rows.push({
         ...empty,
         ...NOT_SKIPPED,
@@ -297,7 +394,7 @@ function amortize(
     }
 
     const principal = scheduledPrincipal + pennyOffset + extra;
-    const escrow = valueFrom(adjustments, 'escrow', k, setup.escrowMonthly).amount;
+    const escrow = escrowAt(k);
     const principalAndInterest = scheduledPrincipal + interest;
 
     rows.push({
@@ -312,6 +409,7 @@ function amortize(
       principalAndInterest,
       pmi: 0,
       escrow,
+      fee: 0,
       total: principalAndInterest + extra + pennyOffset + escrow,
       endingBalance: balance - principal,
       locked: false,
@@ -344,11 +442,12 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
 
   const adjustments = options.adjustments ?? [];
   const locked = options.locked ?? new Map<number, LockedPayment>();
-  const months = setup.termYears * 12;
+  const months = termMonthsOf(setup);
+  const pmiOn = modulesOf(setup).pmi;
   const calculatedPiPayment = standardPayment(setup.originalAmount, setup.annualRatePercent, months);
   const piPayment = setup.piPaymentOverride ?? calculatedPiPayment;
 
-  const rows = amortize(setup, piPayment, adjustments, locked, true);
+  const rows = amortize(setup, piPayment, adjustments, locked, true, options.paidDates);
   const start = setup.startingPoint;
   if (start && rows.length <= start.payment) {
     throw new SetupError([`The original schedule pays the loan off by payment ${rows.length}, before tracking starts`]);
@@ -375,7 +474,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
   for (const row of rows) {
     // Interest-added and deferred skips collect no PMI. A catch-up skip still
     // owes it, as part of the past-due amount.
-    if (row.locked || (row.skipped && row.skipped !== 'catchUp')) continue;
+    if (!pmiOn || row.locked || (row.skipped && row.skipped !== 'catchUp')) continue;
     const set = valueFrom(adjustments, 'pmi', row.payment, setup.pmiMonthly);
     // A PMI change recorded on or after the planned drop means the servicer is
     // still charging it, so reality overrides the plan from that payment on.
@@ -385,6 +484,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
     if (row.skipped) row.pastDue += row.pmi;
     else row.total += row.pmi;
   }
+  applyYearlyFee(rows, setup);
   applyCatchUp(rows, adjustments);
 
   let lastPmi = -1;
@@ -417,12 +517,13 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
       principal: t.principal + (r.skipped ? 0 : r.principal) + (r.catchUp?.principal ?? 0),
       pmi: t.pmi + (r.skipped ? 0 : r.pmi) + (r.catchUp?.pmi ?? 0),
       escrow: t.escrow + (r.skipped ? 0 : r.escrow) + (r.catchUp?.escrow ?? 0),
+      fees: t.fees + r.fee,
       payments: t.payments + (r.skipped ? 0 : 1),
       capitalizedInterest: t.capitalizedInterest + r.capitalizedInterest,
       deferred: t.deferred + r.deferred,
       pastDue: t.pastDue + r.pastDue,
     }),
-    { interest: 0, principal: 0, pmi: 0, escrow: 0, payments: 0, capitalizedInterest: 0, deferred: 0, pastDue: 0 },
+    { interest: 0, principal: 0, pmi: 0, escrow: 0, fees: 0, payments: 0, capitalizedInterest: 0, deferred: 0, pastDue: 0 },
   );
 
   return { piPayment, calculatedPiPayment, rows, pmi, totals };

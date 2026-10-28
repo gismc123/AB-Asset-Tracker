@@ -1,11 +1,23 @@
+import { modulesOf } from './amortize.js';
+import { currentValue, hasProjection, homeAssetFor, latestValue, projectedValue, type Asset, type AssetKind, type AssetValue } from './assets.js';
 import { daysBetween } from './dates.js';
+import { dailyInterest } from './money.js';
 import type { Cents, ISODate, LoanSetup, Schedule, ScheduleRow } from './types.js';
 
-/** An estimate of what the home is worth now (appraisal, tax assessment, online estimate). */
-export interface HomeValueEstimate {
-  date: ISODate;
-  value: Cents;
-  source: string;
+/** Kept for code written before assets: a value estimate of the home. */
+export type HomeValueEstimate = AssetValue;
+
+/** What it would take to pay the loan off today. */
+export interface Payoff {
+  amount: Cents;
+  /** `quote`: the lender's payoff quote, still good. `estimate`: worked out here. */
+  source: 'quote' | 'estimate';
+  /** For a quote: its good-through date. For an estimate: today. */
+  asOf: ISODate;
+  /** Interest per day on today's balance (simple, 365-day year), included in an estimate. */
+  perDiem: Cents;
+  /** Set when a quote is on file but has expired. */
+  expiredQuote: ISODate | null;
 }
 
 export interface LoanSummary {
@@ -23,13 +35,36 @@ export interface LoanSummary {
   /** Balance the schedule expects after every payment due on or before today. */
   scheduledBalance: Cents;
   percentPaid: number;
-  /** Original home value minus what's owed (balance + deferred + past due). */
-  equity: Cents;
-  equityPercent: number;
-  /** Latest home value estimate, if any, and equity measured against it. */
-  homeValue: HomeValueEstimate | null;
+  /** Balance + deferred + past due. */
+  owed: Cents;
+  /** The asset's original value minus what's owed. Null when the loan has no asset. */
+  equity: Cents | null;
+  equityPercent: number | null;
+  /** Latest value entered for the asset, if any, and equity measured against it. */
+  homeValue: AssetValue | null;
   marketEquity: Cents | null;
   marketEquityPercent: number | null;
+  /**
+   * The asset and the headline equity: its current value (latest entry, or
+   * the original value) minus what's owed. Null when the loan has no asset.
+   */
+  asset: {
+    name: string;
+    kind: AssetKind;
+    originalValue: Cents;
+    value: Cents;
+    valueDate: ISODate | null;
+    valueSource: string;
+    /** False when no value has been entered and the original value stands in. */
+    valueEntered: boolean;
+    /** Today's value on the projected curve, when the asset has one. Always an estimate. */
+    projectedValue: Cents | null;
+    equity: Cents;
+    equityPercent: number;
+  } | null;
+  payoff: Payoff | null;
+  /** One-off fees from the setup (paid up front or financed). */
+  oneOffFees: Cents;
   nextPayment: { payment: number; dueDate: ISODate; total: Cents; daysUntil: number } | null;
   payoffDate: ISODate | null;
   pmi: {
@@ -61,18 +96,41 @@ export function settledRows(rows: readonly ScheduleRow[], paid: ReadonlySet<numb
 export const isPaid = (r: ScheduleRow, paid: ReadonlySet<number>) => r.beforeTracking || paid.has(r.payment);
 
 /** The latest estimate by date (later entries win ties). */
-export function latestHomeValue(values: readonly HomeValueEstimate[]): HomeValueEstimate | null {
-  let best: HomeValueEstimate | null = null;
-  for (const v of values) if (!best || v.date >= best.date) best = v;
-  return best;
+export const latestHomeValue = latestValue;
+
+/**
+ * Payoff today: the lender's quote while it's good, otherwise what's owed
+ * plus simple interest since the last payment settled (a per diem, as payoff
+ * quotes count it). An estimate: the lender's quote has the final word.
+ */
+export function payoffToday(setup: LoanSetup, owed: Cents, balance: Cents, lastSettled: ISODate | null, today: ISODate): Payoff | null {
+  if (owed <= 0) return null;
+  const perDiem = dailyInterest(balance, setup.annualRatePercent, 1);
+  const quote = setup.payoffQuote;
+  if (quote && quote.goodThrough >= today) {
+    return { amount: quote.amount, source: 'quote', asOf: quote.goodThrough, perDiem, expiredQuote: null };
+  }
+  const days = Math.max(0, daysBetween(lastSettled ?? setup.openDate, today));
+  return {
+    amount: owed + dailyInterest(balance, setup.annualRatePercent, days),
+    source: 'estimate',
+    asOf: today,
+    perDiem,
+    expiredQuote: quote ? quote.goodThrough : null,
+  };
 }
 
+/**
+ * `asset`: what the loan paid for. Left out, it's the home described by the
+ * setup's original home value (how every loan worked before assets). Null
+ * for a loan with no asset, such as most personal loans.
+ */
 export function summarize(
   setup: LoanSetup,
   schedule: Schedule,
   paid: ReadonlySet<number>,
   today: ISODate,
-  homeValues: readonly HomeValueEstimate[] = [],
+  asset: Asset | null = homeAssetFor(setup),
 ): LoanSummary {
   const rows = schedule.rows;
   const settled = settledRows(rows, paid, today);
@@ -86,10 +144,13 @@ export function summarize(
   const dueByToday = rows.filter((r) => r.dueDate <= today).at(-1);
   const scheduledBalance = dueByToday ? dueByToday.endingBalance : setup.originalAmount;
   const next = rows.find((r) => !isPaid(r, paid) && r.skipped === null) ?? null;
-  const homeValue = latestHomeValue(homeValues);
+  const homeValue = asset ? latestValue(asset.values) : null;
   const p = schedule.pmi;
   const nextRow = next ?? rows.at(-1);
-  const active = p.hasPmi && nextRow !== undefined && (p.dropPayment === null || nextRow.payment < p.dropPayment);
+  const active = modulesOf(setup).pmi && p.hasPmi && nextRow !== undefined && (p.dropPayment === null || nextRow.payment < p.dropPayment);
+  const current = asset ? currentValue(asset) : null;
+  // The settled date a per diem runs from: the bank date for a reconciled payment.
+  const lastSettledDate = lastSettled ? lastSettled.dueDate : null;
 
   return {
     asOf: today,
@@ -101,8 +162,9 @@ export function summarize(
     pastDue,
     scheduledBalance,
     percentPaid: pct(setup.originalAmount - balance, setup.originalAmount),
-    equity: setup.originalHomeValue - owed,
-    equityPercent: pct(setup.originalHomeValue - owed, setup.originalHomeValue),
+    owed,
+    equity: asset ? asset.originalValue - owed : null,
+    equityPercent: asset ? pct(asset.originalValue - owed, asset.originalValue) : null,
     homeValue,
     marketEquity: homeValue ? homeValue.value - owed : null,
     marketEquityPercent: homeValue ? pct(homeValue.value - owed, homeValue.value) : null,
@@ -110,6 +172,23 @@ export function summarize(
       ? { payment: next.payment, dueDate: next.dueDate, total: next.total, daysUntil: daysBetween(today, next.dueDate) }
       : null,
     payoffDate: rows.at(-1)?.dueDate ?? null,
+    asset:
+      asset && current
+        ? {
+            name: asset.name,
+            kind: asset.kind,
+            originalValue: asset.originalValue,
+            value: current.value,
+            valueDate: current.date,
+            valueSource: current.source,
+            valueEntered: current.entered,
+            projectedValue: hasProjection(asset) ? projectedValue(asset, today, setup.openDate) : null,
+            equity: current.value - owed,
+            equityPercent: pct(current.value - owed, current.value),
+          }
+        : null,
+    payoff: payoffToday(setup, owed, balance, lastSettledDate, today),
+    oneOffFees: (setup.fees ?? []).reduce((sum, f) => sum + f.amount, 0),
     pmi: {
       hasPmi: p.hasPmi,
       active,
