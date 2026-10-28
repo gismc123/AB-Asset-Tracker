@@ -52,6 +52,16 @@ export function validateSetup(s: LoanSetup): string[] {
   if (!['auto78Scheduled', 'auto78Actual', 'request80'].includes(s.pmiRemovalRule)) problems.push('Unknown PMI removal rule');
   if (!isCents(s.escrowMonthly)) problems.push('Monthly escrow must be zero or more');
   if (!isCents(s.extraPrincipal)) problems.push('Extra principal must be zero or more');
+  const start = s.startingPoint;
+  if (start) {
+    if (!(Number.isInteger(start.payment) && start.payment >= 1 && (!Number.isInteger(s.termYears) || start.payment < s.termYears * 12))) {
+      problems.push('Tracking has to start after a payment within the term');
+    }
+    if (!isCents(start.balance) || start.balance <= 0) problems.push('The balance when tracking starts must be more than zero');
+    else if (isCents(s.originalAmount) && start.balance > s.originalAmount) {
+      problems.push('The balance when tracking starts can\'t be more than the original loan amount');
+    }
+  }
   return problems;
 }
 
@@ -171,6 +181,8 @@ function amortize(
 ): ScheduleRow[] {
   const rows: ScheduleRow[] = [];
   const termMonths = setup.termYears * 12;
+  // The original schedule knows nothing of what happened before tracking.
+  const start = withExtras ? (setup.startingPoint ?? null) : null;
   let balance = setup.originalAmount;
   let deferredBalance = 0;
 
@@ -184,14 +196,37 @@ function amortize(
     if (lock) {
       const principal = Math.min(lock.principal, balance);
       // Locks saved before skips existed lack the skip fields.
-      rows.push({ ...NOT_SKIPPED, ...lock, payment: k, dueDate, beginningBalance: balance, principal, endingBalance: balance - principal, locked: true });
+      rows.push({
+        ...NOT_SKIPPED,
+        ...lock,
+        payment: k,
+        dueDate,
+        beginningBalance: balance,
+        principal,
+        endingBalance: balance - principal,
+        locked: true,
+        beforeTracking: false,
+      });
       balance -= principal;
       continue;
     }
 
-    const skip = withExtras ? skipAt(adjustments, k) : null;
+    // Before tracking, payments follow the original schedule: no skips, offsets or extras.
+    const beforeTracking = start !== null && k <= start.payment;
+    const skip = withExtras && !beforeTracking ? skipAt(adjustments, k) : null;
     const interest = monthlyInterest(balance, setup.annualRatePercent);
-    const empty = { payment: k, dueDate, beginningBalance: balance, extraPrincipal: 0, pennyOffset: 0, pmi: 0, escrow: 0, total: 0, locked: false };
+    const empty = {
+      payment: k,
+      dueDate,
+      beginningBalance: balance,
+      extraPrincipal: 0,
+      pennyOffset: 0,
+      pmi: 0,
+      escrow: 0,
+      total: 0,
+      locked: false,
+      beforeTracking: false,
+    };
 
     if (skip === 'capitalize') {
       rows.push({
@@ -247,13 +282,19 @@ function amortize(
       continue;
     }
 
-    let pennyOffset = withExtras ? sumFor(adjustments, 'pennyOffset', k) : 0;
+    let pennyOffset = withExtras && !beforeTracking ? sumFor(adjustments, 'pennyOffset', k) : 0;
     pennyOffset = Math.max(-scheduledPrincipal, Math.min(pennyOffset, balance - scheduledPrincipal));
 
-    let extra = withExtras
-      ? standingExtraAt(setup, adjustments, k) + sumFor(adjustments, 'extraPrincipal', k)
-      : 0;
-    extra = Math.max(0, Math.min(extra, balance - scheduledPrincipal - pennyOffset));
+    let extra: Cents;
+    if (beforeTracking) {
+      // Whatever the original schedule doesn't explain was paid as extra
+      // principal at some point before tracking. Recorded on the last payment
+      // before tracking so the balance lands on the statement's.
+      extra = k === start!.payment ? balance - scheduledPrincipal - start!.balance : 0;
+    } else {
+      extra = withExtras ? standingExtraAt(setup, adjustments, k) + sumFor(adjustments, 'extraPrincipal', k) : 0;
+      extra = Math.max(0, Math.min(extra, balance - scheduledPrincipal - pennyOffset));
+    }
 
     const principal = scheduledPrincipal + pennyOffset + extra;
     const escrow = valueFrom(adjustments, 'escrow', k, setup.escrowMonthly).amount;
@@ -274,6 +315,7 @@ function amortize(
       total: principalAndInterest + extra + pennyOffset + escrow,
       endingBalance: balance - principal,
       locked: false,
+      beforeTracking,
       ...NOT_SKIPPED,
     });
     balance -= principal;
@@ -307,6 +349,10 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
   const piPayment = setup.piPaymentOverride ?? calculatedPiPayment;
 
   const rows = amortize(setup, piPayment, adjustments, locked, true);
+  const start = setup.startingPoint;
+  if (start && rows.length <= start.payment) {
+    throw new SetupError([`The original schedule pays the loan off by payment ${rows.length}, before tracking starts`]);
+  }
   // The original schedule: contractual payment only, no extras or corrections.
   const original = amortize(setup, piPayment, [], new Map(), false);
 
@@ -385,6 +431,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
 /** Freeze a generated row so later setup edits or adjustments can't change it. */
 export function lockRow(row: ScheduleRow): LockedPayment {
   if (row.skipped) throw new Error(`Payment ${row.payment} is skipped and can't be locked as paid`);
-  const { beginningBalance: _b, endingBalance: _e, locked: _l, dueDate: _d, ...rest } = row;
+  if (row.beforeTracking) throw new Error(`Payment ${row.payment} was made before tracking began and can't be locked`);
+  const { beginningBalance: _b, endingBalance: _e, locked: _l, dueDate: _d, beforeTracking: _t, ...rest } = row;
   return rest;
 }

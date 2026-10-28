@@ -112,7 +112,11 @@ export function EquityView({ state, client, onState }: Props) {
       </div>
 
       <div className="mt-gap" />
-      <Breakouts periods={a.periods} hasPaid={state.schedule!.rows.some((r) => r.status === 'paid')} />
+      <Breakouts
+        periods={a.periods}
+        hasPaid={state.schedule!.rows.some((r) => r.status === 'paid' || r.status === 'history')}
+        beforeTracking={!!state.setup?.startingPoint}
+      />
     </div>
   );
 }
@@ -132,9 +136,10 @@ function EquityParts({ state }: { state: StateView }) {
     { label: 'Down payment', note: 'Original value minus the amount borrowed', value: e.parts.startingEquity },
     { label: 'Principal paid', note: 'From regular payments', value: e.parts.principalPaid },
     { label: 'Extra principal', note: 'Paid on top of the schedule', value: e.parts.extraPrincipal },
-    { label: 'Home value change', note: e.isEstimate ? `Since purchase, per ${e.homeValueSource.toLowerCase()}` : 'Add an estimate to include it', value: e.parts.marketChange },
+    { label: 'Extra before tracking', note: 'Starting balance vs. the original schedule', value: e.parts.extraBeforeTracking },
+    { label: 'Home value change', note: e.isEstimate ? `Since purchase, per ${e.homeValueSource.toLowerCase()}` : 'Add an estimate to include it', value: e.parts.marketChange, always: !e.isEstimate },
     { label: 'Skipped payments', note: 'Interest added, or payments deferred or not yet caught up', value: e.parts.skipped },
-  ].filter((p, i) => i < 2 || p.value !== 0 || (i === 3 && !e.isEstimate));
+  ].filter((p, i) => i < 2 || p.value !== 0 || p.always);
   const max = Math.max(1, ...parts.map((p) => Math.abs(p.value)));
 
   return (
@@ -273,7 +278,7 @@ const ROWS: { key: keyof PeriodTotals; label: string; color?: string }[] = [
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function Breakouts({ periods, hasPaid }: { periods: Record<PeriodBasis, PeriodBreakouts>; hasPaid: boolean }) {
+function Breakouts({ periods, hasPaid, beforeTracking }: { periods: Record<PeriodBasis, PeriodBreakouts>; hasPaid: boolean; beforeTracking: boolean }) {
   const [basis, setBasis] = useState<PeriodBasis>(hasPaid ? 'paid' : 'scheduled');
   const p = periods[basis];
   const cols = useMemo(() => {
@@ -367,6 +372,8 @@ function Breakouts({ periods, hasPaid }: { periods: Record<PeriodBasis, PeriodBr
           ? 'Reconciled payments, by the date your bank paid them. Your servicer’s year-end statement (Form 1098) counts interest the same way.'
           : 'Every payment due in each period, whether or not it has been reconciled yet.'}{' '}
         Life of loan always includes the payments still to come.
+        {beforeTracking &&
+          ' Payments made before tracking began count by due date with the original schedule’s amounts, so their interest is an estimate (a little high if you paid extra back then).'}
       </div>
     </div>
   );

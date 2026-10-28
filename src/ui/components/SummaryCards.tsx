@@ -25,7 +25,7 @@ export function SummaryCards({ summary }: { summary: LoanSummary }) {
               Schedule expects <Amt cents={summary.scheduledBalance} /> by today
             </>
           ) : (
-            'After your last reconciled payment'
+            'After your last payment'
           )}
         </div>
       </div>

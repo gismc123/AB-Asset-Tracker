@@ -28,6 +28,7 @@ import {
   type Schedule,
   type ScheduleRow,
   type SkipMode,
+  type StartingPoint,
 } from '../engine/index.js';
 import type { BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
 import { LOAN_DETAIL_FIELDS, type LoanDetails, type MonthRecord, type Settings, type Store, type StoredAdjustment, type StoredHomeValue } from './db.js';
@@ -42,7 +43,8 @@ export class HttpError extends Error {
   }
 }
 
-export type RowStatus = 'scheduled' | 'flagged' | 'paid' | 'skipped';
+/** `history`: made before tracking began, so never reconciled. */
+export type RowStatus = 'scheduled' | 'flagged' | 'paid' | 'skipped' | 'history';
 
 export interface MonthView extends ScheduleRow {
   status: RowStatus;
@@ -150,6 +152,14 @@ export function parseDetails(body: unknown): LoanDetails {
   return { fields, custom };
 }
 
+function parseStartingPoint(v: unknown): StartingPoint | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'startingPoint must be an object or null');
+  const o = v as Record<string, unknown>;
+  const int = (k: string) => (typeof o[k] === 'number' ? Math.round(o[k] as number) : Number.NaN);
+  return { payment: int('payment'), balance: int('balance') };
+}
+
 /** Coerce untrusted JSON into a LoanSetup. Validation happens in the engine. */
 export function parseSetup(body: unknown): LoanSetup {
   if (!body || typeof body !== 'object') throw new HttpError(400, 'Expected a JSON object');
@@ -171,6 +181,7 @@ export function parseSetup(body: unknown): LoanSetup {
     pmiRemovalRule: RULES.includes(b.pmiRemovalRule as PmiRemovalRule) ? (b.pmiRemovalRule as PmiRemovalRule) : 'auto78Scheduled',
     escrowMonthly: int('escrowMonthly'),
     extraPrincipal: int('extraPrincipal'),
+    startingPoint: parseStartingPoint(b.startingPoint),
   };
   const problems = validateSetup(setup);
   if (problems.length) throw new HttpError(400, 'Please fix the loan setup', { problems });
@@ -216,6 +227,14 @@ export class MortgageService {
     return row;
   }
 
+  /** Months before tracking have no bank transaction and can't be changed. */
+  private tracked(row: ScheduleRow): ScheduleRow {
+    if (row.beforeTracking) {
+      throw new HttpError(409, `Payment ${row.payment} was made before tracking began, so there's nothing to reconcile or change`);
+    }
+    return row;
+  }
+
   private paidSet(): Set<number> {
     return new Set(this.store.listMonths().filter((m) => m.status === 'paid').map((m) => m.payment));
   }
@@ -242,7 +261,7 @@ export class MortgageService {
       const m = months.get(r.payment);
       return {
         ...r,
-        status: m?.status ?? (r.skipped ? 'skipped' : 'scheduled'),
+        status: m?.status ?? (r.beforeTracking ? 'history' : r.skipped ? 'skipped' : 'scheduled'),
         match: m
           ? {
               transactionId: m.transactionId,
@@ -263,7 +282,7 @@ export class MortgageService {
         totals: schedule.totals,
         pmi: schedule.pmi,
         rows,
-        currentPayment: rows.find((r) => r.status !== 'paid' && r.status !== 'skipped')?.payment ?? null,
+        currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null,
       },
       summary: summarize(setup, schedule, paid, today, base.homeValues),
       analysis: {
@@ -289,6 +308,20 @@ export class MortgageService {
 
   saveSetup(body: unknown) {
     const setup = parseSetup(body);
+    const start = setup.startingPoint;
+    if (start) {
+      const matched = this.store.listMonths().find((m) => m.payment <= start.payment);
+      if (matched) {
+        throw new HttpError(409, `Payment ${matched.payment} is already matched to a bank transaction. Undo it first, or start tracking before it.`);
+      }
+      const changed = this.store.listAdjustments().find(({ adjustment: a }) => 'payment' in a && a.payment <= start.payment);
+      if (changed && 'payment' in changed.adjustment) {
+        throw new HttpError(
+          409,
+          `Payment ${changed.adjustment.payment} has a skip, extra principal or penny offset recorded. Undo it first, or start tracking before it.`,
+        );
+      }
+    }
     this.build(setup); // throws a readable 400 if the schedule cannot be generated
     this.store.saveSetup(setup);
     return this.state();
@@ -317,7 +350,7 @@ export class MortgageService {
 
   async candidates(payment: number, categoryId: unknown, wide = false): Promise<Candidate[]> {
     const setup = this.requireSetup();
-    const row = this.row(this.build(setup), payment);
+    const row = this.tracked(this.row(this.build(setup), payment));
     const cat = this.categoryOrThrow(categoryId);
     const txns = await this.fetchAround(cat, row.dueDate, wide ? WIDE_WINDOW : WINDOW_BEFORE, wide ? WIDE_WINDOW : WINDOW_AFTER);
     return txns
@@ -342,7 +375,7 @@ export class MortgageService {
     if (!transactionId) throw new HttpError(400, 'transactionId is required');
 
     const setup = this.requireSetup();
-    const row = this.row(this.build(setup), payment);
+    const row = this.tracked(this.row(this.build(setup), payment));
     if (row.skipped) throw new HttpError(409, `Payment ${payment} is marked as skipped. Undo the skip first.`);
     const existing = this.store.getMonth(payment);
     if (existing?.status === 'paid') throw new HttpError(409, `Payment ${payment} is already reconciled. Undo it first.`);
@@ -437,7 +470,7 @@ export class MortgageService {
       throw new HttpError(400, `The offset must be whole cents between -${MAX_PENNY_OFFSET} and ${MAX_PENNY_OFFSET}`);
     }
     const setup = this.requireSetup();
-    this.row(this.build(setup), payment);
+    this.tracked(this.row(this.build(setup), payment));
     if (this.store.getMonth(payment)?.status === 'paid') {
       throw new HttpError(409, `Payment ${payment} is reconciled and locked. Undo it first.`);
     }
@@ -454,7 +487,7 @@ export class MortgageService {
     const mode = bodyOf(body).mode as SkipMode;
     if (!SKIP_MODES.includes(mode)) throw new HttpError(400, 'mode must be catchUp, capitalize or defer');
     const setup = this.requireSetup();
-    this.row(this.build(setup), payment);
+    this.tracked(this.row(this.build(setup), payment));
     if (this.store.getMonth(payment)) {
       throw new HttpError(409, `Payment ${payment} is already matched to a bank transaction. Undo that first.`);
     }

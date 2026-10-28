@@ -40,6 +40,12 @@ export interface EquityAnalysis {
     /** Regular principal paid so far. */
     principalPaid: Cents;
     extraPrincipal: Cents;
+    /**
+     * Extra principal paid before tracking began, at times unknown: the gap
+     * between the original schedule and the starting balance. Negative when
+     * the real balance was higher.
+     */
+    extraBeforeTracking: Cents;
     /** Skipped payments: interest added, or payments deferred or past due (zero or negative). */
     skipped: Cents;
     /** Home value change since purchase (zero without an estimate). */
@@ -91,16 +97,18 @@ export function analyzeEquity(
 
   let principalPaid = 0;
   let extraPrincipal = 0;
+  let extraBeforeTracking = 0;
   for (const r of settled) {
     principalPaid += r.catchUp?.principal ?? 0;
     if (r.skipped) continue;
     principalPaid += r.scheduledPrincipal + r.pennyOffset;
-    extraPrincipal += r.extraPrincipal;
+    if (r.beforeTracking) extraBeforeTracking += r.extraPrincipal;
+    else extraPrincipal += r.extraPrincipal;
   }
   const startingEquity = setup.originalHomeValue - setup.originalAmount;
   const marketChange = homeValue - setup.originalHomeValue;
   // Whatever the paid principal doesn't explain comes from skipped months.
-  const skipped = equity - (startingEquity + principalPaid + extraPrincipal + marketChange);
+  const skipped = equity - (startingEquity + principalPaid + extraPrincipal + extraBeforeTracking + marketChange);
 
   const equityPercent = pct(equity, homeValue);
   const milestones = MILESTONES.map((percent): EquityMilestone => {
@@ -122,7 +130,7 @@ export function analyzeEquity(
     equity,
     equityPercent,
     ltv: pct(owed, homeValue),
-    parts: { startingEquity, principalPaid, extraPrincipal, skipped, marketChange },
+    parts: { startingEquity, principalPaid, extraPrincipal, extraBeforeTracking, skipped, marketChange },
     milestones,
     projection,
     settledIndex,

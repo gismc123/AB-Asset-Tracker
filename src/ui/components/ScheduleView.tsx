@@ -12,7 +12,7 @@ interface Props {
 type Filter = 'all' | 'upcoming' | 'reconciled';
 
 export function StatusPill({ status }: { status: MonthView['status'] }) {
-  const label = { paid: 'Paid', flagged: 'Flagged', skipped: 'Skipped', scheduled: 'Scheduled' }[status];
+  const label = { paid: 'Paid', flagged: 'Flagged', skipped: 'Skipped', scheduled: 'Scheduled', history: 'Before tracking' }[status];
   return <span className={`mt-pill ${status}`}>{label}</span>;
 }
 
@@ -23,7 +23,7 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
 
   const shown = useMemo(() => {
     if (filter === 'upcoming') return rows.filter((r) => r.status === 'scheduled' || r.status === 'flagged');
-    if (filter === 'reconciled') return rows.filter((r) => r.status !== 'scheduled');
+    if (filter === 'reconciled') return rows.filter((r) => r.status !== 'scheduled' && r.status !== 'history');
     return rows;
   }, [rows, filter]);
 
@@ -94,7 +94,13 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
                       <>
                         <td><Amt cents={r.scheduledPrincipal + r.pennyOffset} /></td>
                         <td><Amt cents={r.interest} /></td>
-                        <td className={r.extraPrincipal ? '' : 'muted'}>{r.extraPrincipal ? <Amt cents={r.extraPrincipal} /> : '—'}</td>
+                        <td
+                          className={r.extraPrincipal ? '' : 'muted'}
+                          title={r.beforeTracking && r.extraPrincipal ? 'Extra principal paid at some point before tracking began' : undefined}
+                        >
+                          {r.extraPrincipal ? <Amt cents={r.extraPrincipal} /> : '—'}
+                          {r.beforeTracking && r.extraPrincipal !== 0 && ' *'}
+                        </td>
                         <td className={r.pmi ? '' : 'muted'}>{r.pmi ? <Amt cents={r.pmi} /> : '—'}</td>
                         <td><Amt cents={r.escrow} /></td>
                         <td

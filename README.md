@@ -9,7 +9,9 @@ with your bank.
 It's an add-on. Actual itself is never modified, so updating Actual is the
 same one command it always was.
 
-> All numbers in this README, the tests, and the sample files are made up.
+![The Mortgage tab's Overview screen: payment number, balance, percent paid, equity, a balance chart and the PMI countdown](docs/screenshots/overview.png)
+
+> All numbers in this README, the screenshots, the tests, and the sample files are made up.
 
 ---
 
@@ -41,14 +43,39 @@ The Mortgage tab sits in Actual's sidebar, under the regular items. It has seven
 | **Equity** | Home value, what you owe, equity and loan-to-value. How the equity was built (down payment, principal paid, extra principal, home value change). Equity over time, the dates you reach 20%, 22%, 25%, 50%, 75% and 100% equity, and a table of principal, interest, PMI and escrow for this month, this quarter, the year to date, the loan to date, and the life of the loan. |
 | **Escrow** | The escrow account: escrow from each payment, the tax and insurance bills the servicer pays from it, a running balance, totals by year, and whether a year of collections covers a year of bills. |
 | **Reconcile** | One month at a time. Pick your mortgage category, click the matching transaction, and the month is marked paid. If the amount is off, you're asked why. You can also mark a month as skipped here. |
-| **Schedule** | Every payment: due date, principal, interest, extra principal, PMI, escrow, total, balance, and status (*scheduled*, *flagged*, *paid*, or *skipped*). Click any row to reconcile it. |
+| **Schedule** | Every payment: due date, principal, interest, extra principal, PMI, escrow, total, balance, and status (*scheduled*, *flagged*, *paid*, *skipped*, or *before tracking*). Click any row to reconcile it. |
 | **Details** | Reference details: servicer, loan number, lender, insurance, tax parcel, PMI certificate, notes, and fields of your own. |
 | **Setup** | The loan details you enter once, with a live preview of the payment and PMI dates. |
+
+**Reconcile.** Match the payment that synced into Actual. When it differs
+from the schedule, pick what the difference is:
+
+![Reconcile screen with a payment $250 over the schedule, offering extra principal, escrow changed, PMI changed and rounding as explanations](docs/screenshots/reconcile.png)
+
+**Schedule.** Every payment, grouped by year, with its status:
+
+![Schedule screen listing payments with principal, interest, PMI, escrow, total, balance and status](docs/screenshots/schedule.png)
+
+<details>
+<summary><b>Equity</b> and <b>Escrow</b> screens</summary>
+
+![Equity screen: home value, what you owe, how the equity was built, equity milestones, and where your payments went](docs/screenshots/equity.png)
+
+![Escrow screen: escrow balance, yearly cushion, balance chart, totals by year, and the ledger of payments and bills](docs/screenshots/escrow.png)
+
+</details>
 
 It follows Actual's light/dark theme and **privacy mode**: with privacy mode on
 (the eye icon in Actual's top bar), every dollar amount on the Mortgage screens
 turns into a squiggle until you hover over it, using Actual's own privacy
 font, exactly like Actual's numbers.
+
+<details>
+<summary>Dark theme</summary>
+
+![The Overview screen in Actual's dark theme](docs/screenshots/overview-dark.png)
+
+</details>
 
 Under the hood:
 
@@ -223,9 +250,42 @@ Entered once on the **Setup** screen, from your closing documents:
 | Monthly PMI / PMI start date | 0 if you have no PMI. A blank start date means PMI starts with the first payment. |
 | Monthly escrow | Taxes and insurance collected with the payment. |
 | Standing extra principal | Added to every payment, 0 if none. |
+| Already paying on this loan? | For a loan you've been paying for a while: the last payment made and the balance after it. See [below](#a-loan-thats-already-under-way). |
 
 The final payment absorbs the few cents of rounding left over at the end of
 the term, the way lenders do it, so it can differ slightly from the others.
+
+### A loan that's already under way
+
+If you've been paying on the loan for years before setting up the tracker,
+you don't have to reconcile every month since closing. On the Setup screen:
+
+1. Enter the **original** terms from your closing documents, as above
+   (original amount, rate, term, first payment date, P&I payment). Use
+   today's monthly escrow, and today's PMI (0 if it's gone).
+2. Tick **Already paying on this loan?** and enter, from a recent statement,
+   the **due date of your last payment** and the **principal balance after
+   it** (the unpaid principal, not the payoff amount).
+
+![The "Already paying on this loan?" card: last payment due date, principal balance, and how much extra principal that implies](docs/screenshots/setup-underway.png)
+
+Every payment up to that one is marked **Before tracking**. Those payments count
+as made, with the original schedule's amounts, and have nothing to reconcile.
+Reconcile starts with the next payment, and the payment number, percent
+paid, equity and life-of-loan totals stay measured from the original loan.
+
+You don't need to know when you paid extra principal. Whatever the original
+schedule doesn't explain is recorded as **extra before tracking** on the last
+payment before tracking, and shows as its own line under *How your equity
+was built*. The interest on payments before tracking comes from the original
+schedule, so it's an estimate (a little high if you paid extra back then);
+your servicer's yearly Form 1098s have the exact figures. If your balance
+comes out *higher* than the original schedule by more than a few dollars of
+rounding, check the rate, term and P&I payment; a loan modification or an
+adjustable rate can't be modeled this way.
+
+The escrow ledger starts empty. Add your escrow balance from the same
+statement as a **Deposit** on the Escrow screen.
 
 ## 5. The monthly workflow
 

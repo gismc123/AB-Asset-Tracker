@@ -78,7 +78,7 @@ export function ReconcileView({ client, rows, adjustments, payment, onPaymentCha
   }, [client]);
 
   const loadCandidates = useCallback(async () => {
-    if (!categoryId || !row || row.status === 'paid' || row.status === 'skipped') {
+    if (!categoryId || !row || row.status === 'paid' || row.status === 'skipped' || row.status === 'history') {
       setCands(null);
       return;
     }
@@ -192,6 +192,8 @@ export function ReconcileView({ client, rows, adjustments, payment, onPaymentCha
               </button>
             </>
           )}
+
+          {row.status === 'history' && <BeforeTracking row={row} rows={rows} onPaymentChange={onPaymentChange} />}
 
           {row.status === 'flagged' && row.match && (
             <>
@@ -337,7 +339,12 @@ export function ReconcileView({ client, rows, adjustments, payment, onPaymentCha
         </div>
 
         <div className="mt-card">
-          <PaymentBreakdown row={row} title={row.status === 'paid' ? 'Locked amounts' : row.status === 'skipped' ? 'This month' : 'Scheduled'} />
+          <PaymentBreakdown
+            row={row}
+            title={
+              row.status === 'paid' ? 'Locked amounts' : row.status === 'skipped' ? 'This month' : row.status === 'history' ? 'Original schedule' : 'Scheduled'
+            }
+          />
           <div className="mt-gap" />
           <dl className="mt-kv">
             <dt>Balance before</dt>
@@ -452,6 +459,43 @@ function CatchUp({ row, rows, adjustments, busy, onUndo, run, client, onState }:
       <p className="mt-kpi-note">
         Ask your servicer how long the grace period lasts and confirm in writing that there are no late fees or credit reporting.
       </p>
+    </>
+  );
+}
+
+/** A payment made before tracking began: nothing to match. */
+function BeforeTracking({ row, rows, onPaymentChange }: { row: MonthView; rows: MonthView[]; onPaymentChange(payment: number): void }) {
+  const first = rows.find((r) => !r.beforeTracking);
+  const gap = row.extraPrincipal;
+  return (
+    <>
+      <h3>Before tracking</h3>
+      <div className="mt-note">
+        This payment was made before you started tracking the loan, so there's no bank transaction to match. Its amounts come
+        from the original schedule.
+        {gap > 0 && (
+          <>
+            {' '}
+            It also carries <Amt cents={gap} /> of extra principal: the difference between the original schedule and your starting
+            balance, paid at some point before tracking began.
+          </>
+        )}
+        {gap < 0 && (
+          <>
+            {' '}
+            Your starting balance is <Amt cents={-gap} /> higher than the original schedule expected, so the balance is raised by
+            that much here.
+          </>
+        )}
+      </div>
+      {first && (
+        <>
+          <div className="mt-gap" />
+          <button type="button" className="mt-btn" onClick={() => onPaymentChange(first.payment)}>
+            Go to payment #{first.payment}, the first one tracked
+          </button>
+        </>
+      )}
     </>
   );
 }

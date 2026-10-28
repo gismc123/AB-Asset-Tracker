@@ -80,7 +80,9 @@ export interface EscrowReport {
 
 /**
  * Build the escrow ledger from reconciled payments (dated by when the bank
- * paid) and the entries you've recorded.
+ * paid) and the entries you've recorded. Payments made before tracking began
+ * are left out: what was really collected then isn't known, so the escrow
+ * balance at that point is entered as a deposit instead.
  */
 export function escrowReport(
   rows: readonly ScheduleRow[],
@@ -120,7 +122,7 @@ export function escrowReport(
     years.set(year, y);
   }
 
-  const next = rows.find((r) => !paidOn.has(r.payment) && !r.skipped) ?? rows.at(-1);
+  const next = rows.find((r) => !paidOn.has(r.payment) && !r.skipped && !r.beforeTracking) ?? rows.at(-1);
   const monthly = next?.escrow ?? 0;
   const yearAgo = addDays(today, -365);
   const billsLast12 = lines

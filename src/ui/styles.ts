@@ -158,6 +158,7 @@ export const styles = /* css */ `
 .mt-pill.paid { background: var(--good-bg); color: var(--good); }
 .mt-pill.flagged { background: var(--warn-bg); color: var(--warn); }
 .mt-pill.skipped { background: var(--header); color: var(--muted); border: 1px dashed var(--muted); }
+.mt-pill.history { background: var(--header); color: var(--muted); }
 
 /* plain data tables inside cards */
 .mt-data { width: 100%; border-collapse: collapse; }

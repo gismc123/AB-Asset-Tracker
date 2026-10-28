@@ -98,7 +98,7 @@ function mockClient(empty: boolean): MortgageClient {
       const m = months.get(r.payment);
       return {
         ...r,
-        status: m?.status ?? (r.skipped ? 'skipped' : 'scheduled'),
+        status: m?.status ?? (r.beforeTracking ? 'history' : r.skipped ? 'skipped' : 'scheduled'),
         match: m
           ? { transactionId: m.txn.id, transactionDate: m.txn.date, transactionAmount: -m.txn.amount, transactionPayee: m.txn.payee,
               difference: -m.txn.amount - r.total, resolution: (m.resolution as never) ?? null }
@@ -123,7 +123,12 @@ function mockClient(empty: boolean): MortgageClient {
   const later = <T,>(v: T) => new Promise<T>((r) => setTimeout(() => r(v), 150));
   return {
     state: () => later(state()),
-    async saveSetup(next) { setup = next; return later(state()); },
+    async saveSetup(next) {
+      // The real backend refuses this; the preview just forgets matches made before tracking.
+      for (const k of months.keys()) if (next.startingPoint && k <= next.startingPoint.payment) months.delete(k);
+      setup = next;
+      return later(state());
+    },
     async saveSettings(id) { categoryId = id; return later({ categoryId }); },
     categories: () => later([{ id: 'g', name: 'Housing', categories: [{ id: 'cat-mortgage', name: 'Mortgage' }, { id: 'cat-util', name: 'Utilities' }] }]),
     async candidates(n) {

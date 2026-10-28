@@ -10,7 +10,7 @@ export interface HomeValueEstimate {
 
 export interface LoanSummary {
   asOf: ISODate;
-  /** Highest reconciled (paid) payment number, or null before the first one. */
+  /** Highest paid payment number (reconciled, or made before tracking), or null before the first one. */
   lastPaidPayment: number | null;
   paymentsMade: number;
   totalPayments: number;
@@ -49,12 +49,16 @@ export interface LoanSummary {
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 10_000) / 100 : 0);
 
 /**
- * Rows that have happened: reconciled payments, and skipped payments whose
- * due date has passed (a skip has no bank transaction to reconcile).
+ * Rows that have happened: reconciled payments, payments made before
+ * tracking began, and skipped payments whose due date has passed (a skip has
+ * no bank transaction to reconcile).
  */
 export function settledRows(rows: readonly ScheduleRow[], paid: ReadonlySet<number>, today: ISODate): ScheduleRow[] {
-  return rows.filter((r) => paid.has(r.payment) || (r.skipped !== null && r.dueDate <= today));
+  return rows.filter((r) => isPaid(r, paid) || (r.skipped !== null && r.dueDate <= today));
 }
+
+/** Reconciled, or made before tracking began. */
+export const isPaid = (r: ScheduleRow, paid: ReadonlySet<number>) => r.beforeTracking || paid.has(r.payment);
 
 /** The latest estimate by date (later entries win ties). */
 export function latestHomeValue(values: readonly HomeValueEstimate[]): HomeValueEstimate | null {
@@ -72,7 +76,8 @@ export function summarize(
 ): LoanSummary {
   const rows = schedule.rows;
   const settled = settledRows(rows, paid, today);
-  const lastPaid = rows.filter((r) => paid.has(r.payment)).at(-1) ?? null;
+  const paidRows = rows.filter((r) => isPaid(r, paid));
+  const lastPaid = paidRows.at(-1) ?? null;
   const lastSettled = settled.at(-1) ?? null;
   const balance = lastSettled ? lastSettled.endingBalance : setup.originalAmount;
   const deferredBalance = settled.reduce((sum, r) => sum + r.deferred - r.deferredRepaid, 0);
@@ -80,7 +85,7 @@ export function summarize(
   const owed = balance + deferredBalance + pastDue;
   const dueByToday = rows.filter((r) => r.dueDate <= today).at(-1);
   const scheduledBalance = dueByToday ? dueByToday.endingBalance : setup.originalAmount;
-  const next = rows.find((r) => !paid.has(r.payment) && r.skipped === null) ?? null;
+  const next = rows.find((r) => !isPaid(r, paid) && r.skipped === null) ?? null;
   const homeValue = latestHomeValue(homeValues);
   const p = schedule.pmi;
   const nextRow = next ?? rows.at(-1);
@@ -89,7 +94,7 @@ export function summarize(
   return {
     asOf: today,
     lastPaidPayment: lastPaid?.payment ?? null,
-    paymentsMade: rows.filter((r) => paid.has(r.payment)).length,
+    paymentsMade: paidRows.length,
     totalPayments: rows.length,
     balance,
     deferredBalance,

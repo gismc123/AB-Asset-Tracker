@@ -25,6 +25,21 @@ export type ISODate = string;
  */
 export type PmiRemovalRule = 'auto78Scheduled' | 'auto78Actual' | 'request80';
 
+/**
+ * Where tracking starts on a loan that was already under way when it was set
+ * up. Payments 1 to `payment` count as made, with the original schedule's
+ * amounts, and are never reconciled. The difference between the original
+ * schedule's balance after `payment` and the real `balance` is extra
+ * principal paid at some unknown point before tracking began; it is
+ * recorded on that last payment.
+ */
+export interface StartingPoint {
+  /** The last payment made before tracking began. */
+  payment: number;
+  /** Principal balance right after that payment, from a statement. */
+  balance: Cents;
+}
+
 export interface LoanSetup {
   /** Original loan amount (principal borrowed). */
   originalAmount: Cents;
@@ -52,6 +67,8 @@ export interface LoanSetup {
   escrowMonthly: Cents;
   /** Standing extra principal added to every payment. */
   extraPrincipal: Cents;
+  /** Set for a loan that was already under way. Missing or null = tracked from payment 1. */
+  startingPoint?: StartingPoint | null;
 }
 
 /**
@@ -114,6 +131,11 @@ export interface ScheduleRow {
   interest: Cents;
   /** Principal portion of the required P&I payment. */
   scheduledPrincipal: Cents;
+  /**
+   * Extra principal paid this month. On the last payment before tracking it
+   * holds the extra paid before tracking began, and can be negative when the
+   * real balance is higher than the original schedule's.
+   */
   extraPrincipal: Cents;
   pennyOffset: Cents;
   /** Total principal paid this month: scheduled + extra + offset. */
@@ -127,6 +149,8 @@ export interface ScheduleRow {
   endingBalance: Cents;
   /** True when the row came from locked, reconciled actual amounts. */
   locked: boolean;
+  /** Made before tracking began (see `StartingPoint`): amounts are the original schedule's. */
+  beforeTracking: boolean;
   /** Set when this payment is skipped. A skipped row has `total` 0. */
   skipped: SkipMode | null;
   /** Interest added to the balance by a `capitalize` skip (not paid that month). */
@@ -142,7 +166,7 @@ export interface ScheduleRow {
 }
 
 /** Amounts frozen when a month is reconciled as paid. */
-export type LockedPayment = Omit<ScheduleRow, 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate'>;
+export type LockedPayment = Omit<ScheduleRow, 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking'>;
 
 export interface PmiMilestone {
   /** Balance at or below which the milestone is reached. */

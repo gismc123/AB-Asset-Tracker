@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react';
-import { generateSchedule, standardPayment, validateSetup, type LoanSetup, type PmiRemovalRule } from '../../engine/index.js';
+import {
+  dueDateFor,
+  generateSchedule,
+  isValidISODate,
+  standardPayment,
+  validateSetup,
+  type LoanSetup,
+  type PmiRemovalRule,
+} from '../../engine/index.js';
 import { centsToInput, date, money, parseDollars } from '../format.js';
 import { Amt } from './Amt.js';
 
@@ -12,12 +20,26 @@ interface Props {
 
 type Draft = Record<
   | 'originalAmount' | 'annualRatePercent' | 'termYears' | 'openDate' | 'firstPaymentDate' | 'paymentDay'
-  | 'piPaymentOverride' | 'originalHomeValue' | 'pmiMonthly' | 'pmiStartDate' | 'escrowMonthly' | 'extraPrincipal',
+  | 'piPaymentOverride' | 'originalHomeValue' | 'pmiMonthly' | 'pmiStartDate' | 'escrowMonthly' | 'extraPrincipal'
+  | 'startDate' | 'startBalance',
   string
-> & { pmiRemovalRule: PmiRemovalRule };
+> & { pmiRemovalRule: PmiRemovalRule; underway: boolean };
+
+const canDate = (first: string, day: number) => isValidISODate(first) && Number.isInteger(day) && day >= 1 && day <= 31;
+
+/** How many payments fall due on or before `date`. */
+function paymentsDueBy(first: string, day: number, date: string, max: number): number {
+  let n = 0;
+  while (n < max && dueDateFor(first, day, n + 1) <= date) n++;
+  return n;
+}
 
 function toDraft(s: LoanSetup | null): Draft {
+  const start = s?.startingPoint;
   return {
+    underway: !!start,
+    startDate: start && canDate(s.firstPaymentDate, s.paymentDay) ? dueDateFor(s.firstPaymentDate, s.paymentDay, start.payment) : '',
+    startBalance: centsToInput(start?.balance),
     originalAmount: centsToInput(s?.originalAmount),
     annualRatePercent: s ? String(s.annualRatePercent) : '',
     termYears: s ? String(s.termYears) : '30',
@@ -36,6 +58,11 @@ function toDraft(s: LoanSetup | null): Draft {
 
 function fromDraft(d: Draft): LoanSetup {
   const cents = (v: string) => parseDollars(v) ?? Number.NaN;
+  const day = Number(d.paymentDay);
+  const startPayment =
+    canDate(d.firstPaymentDate, day) && isValidISODate(d.startDate)
+      ? paymentsDueBy(d.firstPaymentDate, day, d.startDate, Number(d.termYears) * 12)
+      : Number.NaN;
   return {
     originalAmount: cents(d.originalAmount),
     annualRatePercent: d.annualRatePercent.trim() === '' ? Number.NaN : Number(d.annualRatePercent),
@@ -50,6 +77,7 @@ function fromDraft(d: Draft): LoanSetup {
     pmiRemovalRule: d.pmiRemovalRule,
     escrowMonthly: d.escrowMonthly.trim() ? cents(d.escrowMonthly) : 0,
     extraPrincipal: d.extraPrincipal.trim() ? cents(d.extraPrincipal) : 0,
+    startingPoint: d.underway ? { payment: startPayment, balance: cents(d.startBalance) } : null,
   };
 }
 
@@ -145,7 +173,8 @@ export function SetupForm({ initial, hasReconciled, onSave }: Props) {
     <form onSubmit={submit} noValidate>
       {!initial && (
         <div className="mt-note" style={{ marginBottom: 14 }}>
-          Enter your loan once, straight from your closing documents. You can change anything later.
+          Enter your loan once, straight from your closing documents. You can change anything later. Been paying on it for a
+          while? Enter the original terms anyway, then where the loan stands today under <b>Already paying on this loan?</b>
         </div>
       )}
       {initial && hasReconciled && (
@@ -194,6 +223,9 @@ export function SetupForm({ initial, hasReconciled, onSave }: Props) {
           />
         </div>
       </div>
+
+      <div className="mt-gap" />
+      <StartingPointCard d={d} setD={setD} set={set} setup={setup} preview={preview} />
 
       <div className="mt-gap" />
       <div className="mt-card">
@@ -256,7 +288,8 @@ export function SetupForm({ initial, hasReconciled, onSave }: Props) {
       <div className="mt-row">
         {preview && (
           <span style={{ color: 'var(--muted)' }}>
-            First payment <Amt cents={preview.rows[0]!.total} /> · {preview.rows.length} payments · payoff {date(preview.rows.at(-1)!.dueDate, 'month')}
+            {setup.startingPoint ? 'Next payment' : 'First payment'} <Amt cents={preview.rows[setup.startingPoint?.payment ?? 0]!.total} /> ·{' '}
+            {preview.rows.length} payments · payoff {date(preview.rows.at(-1)!.dueDate, 'month')}
           </span>
         )}
         <span className="mt-spacer" />
@@ -266,5 +299,69 @@ export function SetupForm({ initial, hasReconciled, onSave }: Props) {
         </button>
       </div>
     </form>
+  );
+}
+
+/** For a loan that was already under way: where tracking starts, from a recent statement. */
+function StartingPointCard({ d, setD, set, setup, preview }: {
+  d: Draft;
+  setD: React.Dispatch<React.SetStateAction<Draft>>;
+  set(k: keyof Draft): (v: string) => void;
+  setup: LoanSetup;
+  preview: ReturnType<typeof generateSchedule> | null;
+}) {
+  const start = setup.startingPoint;
+  const last = start && preview ? preview.rows[start.payment - 1] : undefined;
+  const gap = last?.extraPrincipal ?? 0;
+
+  return (
+    <div className="mt-card">
+      <h3>Already paying on this loan?</h3>
+      <label className="mt-row" style={{ cursor: 'pointer' }}>
+        <input type="checkbox" checked={d.underway} onChange={(e) => setD((p) => ({ ...p, underway: e.target.checked }))} />
+        I've been making payments since before I started tracking it here
+      </label>
+      {d.underway && (
+        <>
+          <p style={{ color: 'var(--muted)' }}>
+            Keep the original terms above, from your closing documents. Then enter the most recent payment and balance from a
+            statement. Earlier payments count as paid, with nothing to reconcile. You don't need to know when you paid extra: the
+            difference from the original schedule is worked out for you.
+          </p>
+          <div className="mt-form-section">
+            <Field id="startDate" label="Due date of your last payment" hint="The most recent payment on the statement.">
+              <input id="mt-startDate" type="date" className="mt-input" value={d.startDate} onChange={(e) => set('startDate')(e.target.value)} />
+            </Field>
+            <Money
+              id="startBalance"
+              label="Principal balance after it"
+              value={d.startBalance}
+              onChange={set('startBalance')}
+              hint="The unpaid principal on that statement, not the payoff amount."
+            />
+          </div>
+          {last && (
+            <div className={`mt-note ${gap < 0 ? 'warn' : ''}`} style={{ marginTop: 14 }}>
+              Payments 1–{last.payment} (through {date(last.dueDate)}) count as paid. Tracking starts with payment #{last.payment + 1}.
+              <br />
+              {gap > 0 && (
+                <>
+                  The original schedule expected <Amt cents={last.beginningBalance - last.scheduledPrincipal} /> by then, so you've
+                  paid about <Amt cents={gap} /> in extra principal before tracking.
+                </>
+              )}
+              {gap === 0 && 'Your balance matches the original schedule exactly.'}
+              {gap < 0 && (
+                <>
+                  Your balance is <Amt cents={-gap} /> higher than the original schedule's{' '}
+                  <Amt cents={last.beginningBalance - last.scheduledPrincipal} />. A few dollars is normal rounding; much more
+                  usually means the rate, term or P&amp;I payment above doesn't match your note, or the loan was modified.
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

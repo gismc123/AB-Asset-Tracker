@@ -31,8 +31,9 @@ export interface PeriodTotals {
 
 /**
  * `paid`: reconciled payments, dated by when the bank paid them (what lands
- * on your year-end mortgage statement). `scheduled`: every payment, dated by
- * its due date, whether or not it has been reconciled yet.
+ * on your year-end mortgage statement), plus payments made before tracking
+ * began, dated by their due date. `scheduled`: every payment, dated by its
+ * due date, whether or not it has been reconciled yet.
  */
 export type PeriodBasis = 'paid' | 'scheduled';
 
@@ -120,12 +121,19 @@ export function periodBreakouts(
 
   for (const r of rows) {
     add(fullLoan.totals, r);
-    // A skipped month has no bank date, so it always counts by due date.
-    const when = basis === 'scheduled' || r.skipped ? r.dueDate : paidOn.get(r.payment);
+    // Skipped months and payments before tracking have no bank date, so they count by due date.
+    const when = basis === 'scheduled' || r.skipped || r.beforeTracking ? r.dueDate : paidOn.get(r.payment);
     if (!when) continue;
+    // The extra paid before tracking was paid at times unknown, not in this
+    // payment's month, so only the loan-to-date totals include it.
+    const dated = r.beforeTracking && r.extraPrincipal
+      ? { ...r, extraPrincipal: 0, principal: r.principal - r.extraPrincipal, total: r.total - r.extraPrincipal }
+      : r;
     for (const p of Object.values(periods)) {
       // Loan to date has no lower bound: a first payment can clear before its due date.
-      if ((p === periods.loanToDate || when >= p.start) && when <= p.end) add(p.totals, r);
+      if (p === periods.loanToDate) {
+        if (when <= p.end) add(p.totals, r);
+      } else if (when >= p.start && when <= p.end) add(p.totals, dated);
     }
   }
   return { basis, ...periods, fullLoan };

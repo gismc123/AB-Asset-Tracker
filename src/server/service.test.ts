@@ -330,3 +330,54 @@ describe('catch-up plans', () => {
     expect(service.state().summary!.pastDue).toBe(0);
   });
 });
+
+describe('a loan already under way', () => {
+  // Payments 1 and 2 (Apr and May 2025) were made before tracking; today is June 15.
+  const underway = (balance = 31_500_000) => ({ ...SAMPLE_SETUP, startingPoint: { payment: 2, balance } });
+
+  it('counts earlier payments as made and opens the first tracked one', () => {
+    service.saveSetup(underway());
+    const s = service.state();
+    expect(s.setup!.startingPoint).toEqual({ payment: 2, balance: 31_500_000 });
+    expect(s.schedule!.rows.slice(0, 2).map((r) => r.status)).toEqual(['history', 'history']);
+    expect(row(3).status).toBe('scheduled');
+    expect(s.schedule!.currentPayment).toBe(3);
+    expect(s.summary).toMatchObject({ lastPaidPayment: 2, balance: 31_500_000 });
+    expect(s.summary!.nextPayment!.payment).toBe(3);
+  });
+
+  it('has nothing to reconcile, skip or offset before tracking', async () => {
+    service.saveSetup(underway());
+    source.add('t1', '2025-04-01', -row(1).total);
+    await expectHttp(service.candidates(1, undefined), 409);
+    await expectHttp(service.match(1, { transactionId: 't1' }), 409);
+    await expectHttp(() => service.skip(2, { mode: 'capitalize' }), 409);
+    await expectHttp(() => service.setOffset(2, { amount: 1 }), 409);
+    expect((await service.candidates(3, undefined)).length).toBe(0);
+  });
+
+  it('refuses a starting point after a month that is already reconciled or changed', async () => {
+    source.add('t1', '2025-04-01', -row(1).total);
+    await service.match(1, { transactionId: 't1' });
+    await expectHttp(() => service.saveSetup(underway()), 409);
+    service.unmatch(1);
+    service.skip(2, { mode: 'capitalize' });
+    await expectHttp(() => service.saveSetup(underway()), 409);
+    service.unskip(2);
+    service.saveSetup(underway());
+    expect(row(1).status).toBe('history');
+  });
+
+  it('can be turned off again', () => {
+    service.saveSetup(underway());
+    service.saveSetup({ ...SAMPLE_SETUP, startingPoint: null });
+    expect(service.state().schedule!.currentPayment).toBe(1);
+    expect(row(1).status).toBe('scheduled');
+  });
+
+  it('rejects a malformed starting point', async () => {
+    await expectHttp(() => service.saveSetup({ ...SAMPLE_SETUP, startingPoint: 'soon' }), 400);
+    await expectHttp(() => service.saveSetup({ ...SAMPLE_SETUP, startingPoint: { payment: 2 } }), 400);
+    await expectHttp(() => service.saveSetup(underway(0)), 400);
+  });
+});
