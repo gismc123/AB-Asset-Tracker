@@ -112,10 +112,13 @@ describe('auto loan', () => {
 
     const e = analyzeEquity(auto, s, new Set([1, 2, 3]), '2025-07-01', car);
     expect(e.projected).toBe(true);
-    // Ahead of today, value follows the curve down.
+    // Every point follows the curve down, with no jump at today.
     const future = e.projection.filter((p) => p.dueDate > '2025-07-01');
     expect(future[0]!.value).toBeLessThan(3_600_000);
     expect(future.at(-1)!.value).toBeLessThan(future[0]!.value);
+    for (let i = 1; i < e.projection.length; i++) expect(e.projection[i]!.value).toBeLessThanOrEqual(e.projection[i - 1]!.value);
+    // Today's equity still uses the value entered (here, the price paid).
+    expect(e.equity).toBe(3_600_000 - e.owed);
     // Vehicles get a "worth more than you owe" (0%) milestone, not the PMI lines.
     expect(e.milestones.map((m) => m.percent)).toEqual([0, 25, 50, 75, 100]);
   });

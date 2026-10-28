@@ -117,10 +117,10 @@ export function EquityView({ state, client, onState }: Props) {
             points={e.projection.map((p) => ({ date: p.dueDate, value: p.equity, note: `Payment #${p.payment}` }))}
           />
           <div className="mt-kpi-note" style={{ marginTop: 8 }}>
-            Solid: payments made. Dashed: the schedule ahead,{' '}
+            Solid: payments made. Dashed: the schedule ahead.{' '}
             {e.projected
-              ? `with the ${noun}'s value following its projected yearly ${asset?.valueTrend === 'depreciating' ? 'drop' : 'rise'} of ${asset?.trendRatePercent}% (an estimate).`
-              : `at today's ${noun} value.`}
+              ? `The ${noun}'s value follows its projected yearly ${asset?.valueTrend === 'depreciating' ? 'drop' : 'rise'} of ${asset?.trendRatePercent}%, starting from the values you entered (an estimate).`
+              : `At today's ${noun} value.`}
           </div>
         </div>
         <div className="mt-card">

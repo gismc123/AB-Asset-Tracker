@@ -101,7 +101,7 @@ A $30,000 loan at 6.9% for 60 months on a $36,000 hatchback, with $6,000
 down and a $299 processing fee, using daily simple interest. After six
 payments you owe $27,439.32. A September pricing guide values the car at
 $32,500, so equity is **$5,061**. The car is set to lose an estimated 15% a
-year, so the equity chart ahead follows that curve, and the screen shows
+year, so the equity chart follows that curve, and the screen shows
 the projected value today ($32,112) next to the value you entered.
 
 ![Vehicle screen of a sample car loan: vehicle value with a projected estimate, what you owe, equity, loan-to-value, how equity was built, and the vehicle's value history](docs/screenshots/vehicle.png)
@@ -467,9 +467,9 @@ online estimate), or the purchase price until you enter one.
 
 **Projected value.** An asset can also have a yearly trend: a drop for
 vehicles (15% a year is offered as a starting point) or a rise for a home.
-The projection is only an estimate. It draws the equity chart ahead and
-shows a *projected today* figure next to your latest value; the headline
-equity always uses the value you entered. Enter a fresh value from a pricing
+The projection is only an estimate. It shapes the equity chart (starting
+from the values you entered) and shows a *projected today* figure next to
+your latest value; the headline equity always uses the value you entered. Enter a fresh value from a pricing
 guide now and then and the curve restarts from it.
 
 **Vehicles** usually lose value faster than the loan is paid down at first,

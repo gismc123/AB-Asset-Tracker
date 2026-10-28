@@ -16,7 +16,7 @@ export interface EquityPoint {
   dueDate: ISODate;
   /** Balance plus any deferred amount still owed after this payment. */
   owed: Cents;
-  /** The asset's value at that point: today's value, or the projected curve ahead. */
+  /** The asset's value at that point: today's value, or the projected curve when the asset has one. */
   value: Cents;
   equity: Cents;
 }
@@ -56,7 +56,7 @@ export interface EquityAnalysis {
     /** Value change since purchase (zero without an estimate). */
     marketChange: Cents;
   };
-  /** True when future points follow a projected value curve rather than today's value. */
+  /** True when every point follows the asset's projected value curve rather than today's value. */
   projected: boolean;
   milestones: EquityMilestone[];
   /** Equity after every payment on the schedule, at today's home value. */
@@ -72,9 +72,10 @@ const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / who
 
 /**
  * Equity today and how it was built, plus when the schedule reaches common
- * equity milestones. Future points keep today's value, or follow the
- * asset's projected curve when it has one. `asset` defaults to the home
- * described by the setup (how every loan worked before assets).
+ * equity milestones. Every point keeps today's value, or, when the asset
+ * has a projected curve, follows that curve (anchored on the values entered)
+ * so the line has no jump at today. `asset` defaults to the home described
+ * by the setup (how every loan worked before assets).
  */
 export function analyzeEquity(
   setup: LoanSetup,
@@ -87,7 +88,7 @@ export function analyzeEquity(
   const estimate = current.entered ? current : null;
   const homeValue = current.value;
   const projected = hasProjection(asset);
-  const valueAt = (date: ISODate) => (projected && date > today ? projectedValue(asset, date, setup.openDate) : homeValue);
+  const valueAt = (date: ISODate) => (projected ? projectedValue(asset, date, setup.openDate) : homeValue);
   const settled = settledRows(schedule.rows, paid, today);
   const settledSet = new Set(settled.map((r) => r.payment));
 

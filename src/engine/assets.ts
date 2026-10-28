@@ -62,7 +62,7 @@ export function currentValue(asset: Asset): { value: Cents; date: ISODate | null
     : { value: asset.originalValue, date: asset.acquiredDate, source: 'Original value', entered: false };
 }
 
-/** True when the asset has a projected curve: a trend with a yearly rate. */
+/** True when the asset has a projected curve: a trend with a yearly rate. Drives the equity chart, never today's equity. */
 export const hasProjection = (asset: Asset) =>
   asset.valueTrend !== 'manual' && typeof asset.trendRatePercent === 'number' && asset.trendRatePercent > 0;
 
