@@ -42,6 +42,6 @@ Tested with Actual server 26.10.0 and `@actual-app/api` 26.10.0.
 
 ## Known limitations
 
-See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md). In short:
+See [docs/KNOWN_LIMITATIONS.md](https://github.com/gismc123/AB-Asset-Tracker/blob/main/docs/KNOWN_LIMITATIONS.md). In short:
 monthly payments only, fixed rates, U.S. conventional PMI rules, one asset
 per loan, and the desktop layout of Actual.
