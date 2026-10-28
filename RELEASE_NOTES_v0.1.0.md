@@ -20,6 +20,10 @@ front of Actual and only ever reads from your budget.
   PMI change, and the rest of the schedule recalculates. Skipped payments
   (caught up later, interest added, or deferred to payoff) and catch-up
   plans are supported.
+- **PMI your way.** Drop PMI at the automatic 78% date, at 78% of your
+  real balance, or when you request it at 80%. Or keep it until you record
+  that it was removed, for a servicer that keeps charging or insurance that
+  lasts the life of the loan. Record the real removal from the Overview.
 - **Assets and equity.** Equity is the asset's latest value minus what you
   owe. Record values over time, and optionally project a yearly drop (for
   vehicles) or rise, always labeled as an estimate.
@@ -33,6 +37,9 @@ front of Actual and only ever reads from your budget.
   the command line for scheduled backups.
 - **Read-only summary endpoint** for dashboards, with every loan or one at
   a time, behind its own token sent as a Bearer header.
+- **Works behind a Cloudflare Tunnel** or your own HTTPS reverse proxy:
+  set `PROXY_TLS=off` and point the tunnel at the add-on's port. The README
+  walks through it.
 - **Preview page** with made-up sample loans, for trying the screens without
   Actual.
 
@@ -43,5 +50,6 @@ Tested with Actual server 26.10.0 and `@actual-app/api` 26.10.0.
 ## Known limitations
 
 See [docs/KNOWN_LIMITATIONS.md](https://github.com/gismc123/AB-Asset-Tracker/blob/main/docs/KNOWN_LIMITATIONS.md). In short:
-monthly payments only, fixed rates, U.S. conventional PMI rules, one asset
-per loan, and the desktop layout of Actual.
+monthly payments only, fixed rates, PMI dates from U.S. conventional-loan
+rules, one asset per loan, every Actual user sees every loan, and the
+desktop layout of Actual.
