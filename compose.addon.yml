@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      PORT: "3100"
+      PORT: ${BACKEND_PORT:-3100}
       DATA_DIR: /data
       # Lets Node trust a self-signed Actual certificate (empty = system CAs only).
       NODE_EXTRA_CA_CERTS: ${ACTUAL_CA_CERT:-}
@@ -21,7 +21,7 @@ services:
       - ./data:/data
       - ${ACTUAL_CERT_DIR:-./certs}:/certs:ro
     expose:
-      - "3100"
+      - ${BACKEND_PORT:-3100}
 
   mortgage-proxy:
     build: ./proxy
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
     environment:
       ACTUAL_UPSTREAM: ${ACTUAL_UPSTREAM:?Set ACTUAL_UPSTREAM in .env}
-      MORTGAGE_BACKEND: http://mortgage-backend:3100
+      MORTGAGE_BACKEND: http://mortgage-backend:${BACKEND_PORT:-3100}
     volumes:
       # Read-write only so a self-signed pair can be generated on first start
       # when the folder is empty. Existing files are never overwritten.

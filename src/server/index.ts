@@ -18,6 +18,7 @@ function main() {
     }
     throw e;
   }
+  for (const w of config.warnings) console.warn(`[mortgage] ${w}`);
 
   const store = new Store(path.join(config.dataDir, 'mortgage.sqlite'));
   const source = new ActualApiSource({ ...config.actual, dataDir: config.dataDir });

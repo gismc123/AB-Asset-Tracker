@@ -19,7 +19,7 @@ COPY package.json ./
 RUN mkdir -p /data && chown node:node /data
 EXPOSE 3100
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
-  CMD node -e "fetch('http://127.0.0.1:3100/mortgage-api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3100)+'/mortgage-api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 # Docker creates a missing ./data bind mount owned by root, so take ownership
 # of it first, then drop to the unprivileged "node" user for the actual service.
 CMD ["sh", "-c", "chown node:node /data 2>/dev/null; exec setpriv --reuid=node --regid=node --init-groups node dist/server/index.js"]

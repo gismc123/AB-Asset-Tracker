@@ -16,7 +16,8 @@ include:
 services:
   actual:
     # The stock image, unmodified. Nothing in this repo patches it.
-    image: docker.io/actualbudget/actual-server:latest
+    # Pin a version in .env (ACTUAL_IMAGE) if you prefer controlled updates.
+    image: ${ACTUAL_IMAGE:-docker.io/actualbudget/actual-server:latest}
     restart: unless-stopped
     volumes:
       - ${ACTUAL_DATA_DIR:-./actual-data}:/data
