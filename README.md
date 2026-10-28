@@ -1,7 +1,6 @@
 # AB Asset Tracker
 
-> If this project is useful to you, you can help fund its development on
-> [Patreon](https://patreon.com/IvanS1123). Thank you!
+[![Support this project on Patreon](https://img.shields.io/badge/Patreon-Support%20this%20project-F96854?logo=patreon&logoColor=white)](https://patreon.com/IvanS1123)
 
 A **Loans** section for a self-hosted [Actual Budget](https://actualbudget.org)
 server. It follows each of your loans (mortgages, car loans, personal loans)
@@ -34,6 +33,7 @@ affiliated with or endorsed by the Actual Budget project.
 - [How it works](#how-it-works)
 - [Compatibility](#compatibility)
 - [Development](#development)
+- [Support the project](#support-the-project)
 
 ---
 
@@ -168,6 +168,10 @@ loan to add, then shows only the fields that kind needs.
 
  Have your loan paperwork or a recent statement at hand. See [Adding a loan](#adding-a-loan)
 for what each field means.
+
+> **All set?** AB Asset Tracker is free and built in spare time. If it's
+> useful to you, you can chip in on [Patreon](https://patreon.com/IvanS1123).
+> It's entirely optional; every feature is free either way.
 
 ---
 
@@ -788,7 +792,8 @@ any fixed-rate loan with monthly payments.
 
 **How do I support the project?**
 Star it on GitHub, report bugs, or help fund it on
-[Patreon](https://patreon.com/IvanS1123).
+[Patreon](https://patreon.com/IvanS1123). See
+[Support the project](#support-the-project).
 
 ### Data, privacy and backups
 
@@ -1233,6 +1238,21 @@ cents.
 | `DELETE /assets/:assetId/values/:valueId` | Remove a value |
 | `GET /backup` | Everything in the tracker as a backup file (JSON attachment) |
 | `POST /restore?confirm=replace` | Body: a backup file. Replaces everything, after saving a copy of the database |
+
+## Support the project
+
+AB Asset Tracker is free and open source, and it stays that way: nothing is
+locked behind a payment. If it saves you time each month, any of these
+helps:
+
+- **Chip in on [Patreon](https://patreon.com/IvanS1123).** Support goes
+  toward the time spent on new features (see the
+  [roadmap](docs/ROADMAP.md)), fixes and testing against new Actual releases.
+- **Star the repository** on GitHub, so other Actual users can find it.
+- **Report bugs or ideas** in an issue. Real loans turn up cases no test
+  covers.
+
+Thank you!
 
 ## License
 
