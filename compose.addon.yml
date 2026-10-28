@@ -30,6 +30,9 @@ services:
     environment:
       ACTUAL_UPSTREAM: ${ACTUAL_UPSTREAM:?Set ACTUAL_UPSTREAM in .env}
       TRACKER_BACKEND: http://asset-tracker-backend:${BACKEND_PORT:-3100}
+      # File names inside ACTUAL_CERT_DIR (mounted at /certs).
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-tls.crt}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-tls.key}
     volumes:
       # Read-write only so a self-signed pair can be generated on first start
       # when the folder is empty. Existing files are never overwritten.
