@@ -59,6 +59,11 @@ Then pick your setup:
 | **A** | **Existing Actual** | You already run Actual on this machine, for example from its own Docker container on port 5006. Most people. Your Actual container isn't touched. |
 | **B** | **Fresh install** | You don't run Actual yet. This starts Actual and the add-on together. |
 
+Reach Actual through a **Cloudflare Tunnel** or your own HTTPS reverse
+proxy? Pick A or B as usual, and read
+[Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy)
+before step 3.
+
 ### Step 1: Download
 
 ```sh
@@ -131,6 +136,10 @@ Your browser warns about the certificate the first time, because the add-on
 made its own. Accept it to continue, or
 [use a real certificate](#use-a-real-certificate).
 
+Behind a Cloudflare Tunnel or your own HTTPS proxy, open your public name
+instead (for example `https://budget.example.com`), once the tunnel points
+at port 5007.
+
 Log in to Actual as usual. **Loans** appears in the sidebar.
 
 ### Step 6 (setup B only): Create your budget, then connect the tracker
@@ -174,6 +183,107 @@ for what each field means.
 > It's entirely optional; every feature is free either way.
 
 ---
+
+### Behind a Cloudflare Tunnel or another HTTPS proxy
+
+Many people reach Actual from outside their home through a **Cloudflare
+Tunnel**: `cloudflared` sends a public name such as `budget.example.com` to
+Actual on the home server (for example `http://192.0.2.10:5006`), and
+Cloudflare handles the HTTPS certificate. The same goes for your own reverse
+proxy (Caddy, Traefik, Nginx Proxy Manager) or Tailscale Serve.
+
+That works with the add-on too. Only two things change: the tunnel points
+at the add-on's port (5007) instead of Actual's, and you tell the add-on
+that something in front already handles HTTPS.
+
+```
+ browser ──HTTPS──▶ Cloudflare ──tunnel──▶ cloudflared ──▶ add-on proxy :5007 ──▶ Actual :5006
+                    (certificate)                              │
+                                                               └──▶ tracker backend ──▶ Actual
+```
+
+Everything still goes through the one public name: Actual, the Loans
+screens and the tracker's API. Actual itself doesn't change.
+
+**1. Point the backend at Actual on your network**, not at the public name.
+Use the same address your tunnel uses for Actual today. For an Actual on
+this machine on plain HTTP, with setup A:
+
+```ini
+ACTUAL_SERVER_URL=http://actual:5006
+ACTUAL_UPSTREAM=http://actual:5006
+```
+
+If Actual runs on another machine, use its address instead, for example
+`http://192.0.2.10:5006`. Don't use `https://budget.example.com` here: every
+request would leave your network and come back, and if the name is
+protected by Cloudflare Access, the backend gets a login page instead of
+your budget.
+
+**2. Pick how the tunnel talks to the add-on.**
+
+| | Use it if | In `.env` | Tunnel service |
+|---|---|---|---|
+| **Plain HTTP** (recommended) | You open Actual only through the Cloudflare name. | `PROXY_TLS=off` | `http://<this-machine>:5007` |
+| **HTTPS** | You also want to open `https://<this-machine>:5007` at home. | `PROXY_TLS=on` (the default) | `https://<this-machine>:5007`, with **No TLS Verify** on |
+
+`<this-machine>` is the address `cloudflared` uses to reach the add-on:
+`localhost` when `cloudflared` runs on this machine as a system service (or
+in Docker with host networking), otherwise this machine's network address,
+such as `192.0.2.10`.
+
+With plain HTTP, the add-on's port shouldn't be open to everyone on your
+network. When `cloudflared` runs on this machine, also set
+`PROXY_PORT=127.0.0.1:5007`, so only this machine can reach it. Actual
+refuses to run on plain `http://` addresses other than `localhost` anyway,
+so with `PROXY_TLS=off` you always open it through the Cloudflare name.
+
+**3. Apply it:** `docker compose up -d`. The proxy log
+(`docker compose logs asset-tracker-proxy`) says `TLS: off` or `TLS: on`.
+
+**4. Change the tunnel.** In the Cloudflare dashboard, open *Zero Trust →
+Networks → Tunnels*, pick your tunnel, and edit the public hostname you use
+for Actual (Cloudflare also calls it a *published application route*):
+
+- **Plain HTTP:** set the service type to `HTTP` and the URL to
+  `<this-machine>:5007`.
+- **HTTPS:** set the type to `HTTPS` and the URL to `<this-machine>:5007`,
+  then under *Additional application settings → TLS* turn on **No TLS
+  Verify**. The add-on's certificate is self-signed; the part you see in
+  the browser is still Cloudflare's certificate.
+
+If you run `cloudflared` from a `config.yml` instead, change the service of
+Actual's hostname, then restart `cloudflared`:
+
+```yaml
+ingress:
+  - hostname: budget.example.com
+    service: http://localhost:5007        # plain HTTP
+    # or, with PROXY_TLS=on:
+    # service: https://localhost:5007
+    # originRequest:
+    #   noTLSVerify: true
+  - service: http_status:404
+```
+
+**5. Open `https://budget.example.com`**, log in as usual, and **Loans** is in
+the sidebar. If it isn't, hard-reload once (Ctrl+Shift+R / Cmd+Shift+R):
+Actual's page may be cached from before.
+
+Good to know:
+
+- **Cloudflare Access** keeps working. It's one address, so the login
+  Cloudflare gives your browser also covers the Loans screens.
+- **The summary endpoint** is on the public name too once `SUMMARY_TOKEN`
+  is set, so use a long random token. A dashboard at home should call the
+  add-on on your network instead (`http://192.0.2.10:5007/...` with plain
+  HTTP). Cloudflare Access would block it on the public name.
+- **Rocket Loader**: if it's turned on for your domain and Loans never
+  appears, turn it off for this hostname. It changes how pages load their
+  scripts.
+- **Another reverse proxy** works the same way: point it at
+  `http://<this-machine>:5007` with `PROXY_TLS=off`, keep WebSocket support
+  on, and let it pass `X-Forwarded-Proto` along.
 
 ## Update
 
@@ -506,7 +616,8 @@ yearly fee that falls on a skipped month moves to the next payment made.
 **Equity is the asset's value minus what you owe** (the balance plus any
 deferred or past-due amounts). The value is the latest one you've entered on
 the value screen (an appraisal, a tax assessment, a pricing guide, an online
-estimate), or the purchase price until you enter one.
+estimate), or the purchase price until you enter one. A value of 0 is
+allowed, for a car that was totaled or anything written off.
 
 **Projected value.** An asset can also have a yearly trend: a drop for
 vehicles (15% a year is offered as a starting point) or a rise for a home.
@@ -578,9 +689,11 @@ differently.
 
 ### PMI (mortgages)
 
-> **Confirm your own loan's terms.** The tracker assumes a **conventional**
-> U.S. loan, where PMI follows the Homeowners Protection Act. FHA (MIP), VA,
-> USDA, and lender-paid PMI follow different rules.
+> **Confirm your own loan's terms.** The first three rules below assume a
+> **conventional** U.S. loan, where PMI follows the Homeowners Protection
+> Act. FHA (MIP), VA, USDA, and lender-paid PMI follow different rules; for
+> insurance that lasts the life of the loan, use *Keep PMI until I record it
+> removed*.
 
 - **At 80% of the original home value** you may *ask* the servicer to cancel
   PMI. Extra principal gets you there sooner.
@@ -599,11 +712,26 @@ PMI:
 | **Automatic at 78% (recommended)** | the payment where the original schedule reaches 78%. |
 | Automatic at 78% of my real balance | your real balance (with extras) reaches 78%. Only if your servicer confirms they do this. |
 | I will request removal at 80% | your real balance reaches 80%. Pick this once you plan to send the request. |
+| Keep PMI until I record it removed | nothing: PMI stays on every payment, past 80%, 78% and the midpoint, until you record that it was removed. |
 
-Whatever you pick, PMI never stays on the schedule past the 78% automatic
-date or the midpoint. If the servicer stops (or keeps) charging PMI on a
-different month, reconcile that month and answer **PMI changed**. No PMI at
-all? Turn it off under Setup.
+With the first three settings, PMI doesn't stay on the schedule past the
+78% automatic date or the midpoint. Plenty of real loans don't work that
+way: the servicer is slow to drop it, you weren't current when the date
+came, or the insurance lasts the life of the loan. Pick **Keep PMI until I
+record it removed** for those, and the countdown shows what you pay each
+month instead of a drop date, plus a reminder once you've passed 80% and can
+ask for cancellation.
+
+**When PMI actually comes off**, record it on the Overview under the PMI
+countdown: *PMI removed? First payment without it*, then **Record
+removal**. It works with every setting, so it also covers PMI removed early
+on a new appraisal. **Undo** takes it back. A month you've already
+reconciled keeps the PMI it really paid, so the removal has to start after
+the last reconciled month.
+
+You can also let reconciling find it: when a payment comes in short by the
+PMI amount (or still includes PMI after the schedule dropped it), answer
+**PMI changed** for that month. No PMI at all? Turn it off under Setup.
 
 ### Backing up and restoring
 
@@ -670,7 +798,8 @@ invalid. After changing `.env`, run `docker compose up -d`.
 | `ACTUAL_SYNC_ID` | **yes** | none | Which budget to read. |
 | `ACTUAL_BUDGET_PASSWORD` | no | empty | Only if the budget uses end-to-end encryption. |
 | `ACTUAL_CA_CERT` | no | empty | Path *inside the backend container* to Actual's certificate, if it's self-signed. See [below](#actual-uses-a-self-signed-certificate). |
-| `PROXY_PORT` | no | `5007` | The port you open in the browser. |
+| `PROXY_PORT` | no | `5007` | The port you open in the browser. Prefix an address to listen only there, e.g. `127.0.0.1:5007`. |
+| `PROXY_TLS` | no | `on` | `off` serves plain HTTP, for a [Cloudflare Tunnel or reverse proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy) that handles HTTPS. |
 | `ACTUAL_CERT_DIR` | no | `./certs` | Host folder with the proxy's certificate and key (and Actual's CA cert, if any). |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | no | `tls.crt` / `tls.key` | File names of the proxy's certificate and key inside `ACTUAL_CERT_DIR`. |
 | `ACTUAL_DATA_DIR` | no | `./actual-data` | Setup B only: where Actual stores its data. |
@@ -776,7 +905,8 @@ and makes no other outside connections.
 
 **Who can see my loans?**
 Anyone who can log in to your Actual server through the proxy port. The
-tracker checks every request against Actual's own login.
+tracker checks every request against Actual's own login. With Actual's
+multi-user (OpenID) login, that means every user sees every loan.
 
 **How do I back up and restore?**
 Click **Backup** next to the loan tabs, then *Download backup*. To restore,
@@ -883,13 +1013,21 @@ Set `ACTUAL_SERVER_URL` and `ACTUAL_UPSTREAM` to that machine's address, e.g.
 can reach Actual.
 
 **Can I put it behind my own reverse proxy (Caddy, Traefik, Nginx Proxy Manager)?**
-Yes. Point your reverse proxy at `https://<this-machine>:5007` instead of at
-Actual, and tell it not to verify the add-on's self-signed certificate (or
-give the add-on a real one). Keep WebSocket support on, as for Actual.
+Yes. Point your reverse proxy at port 5007 instead of at Actual. Either set
+`PROXY_TLS=off` and use `http://<this-machine>:5007`, or keep HTTPS and tell
+the reverse proxy not to verify the add-on's self-signed certificate. Keep
+WebSocket support on, as for Actual. See
+[Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy).
 
-**Can I reach it remotely (VPN, Tailscale)?**
-Yes, the same way you reach Actual: open the proxy port (5007) over your
-VPN instead of Actual's.
+**I use a Cloudflare Tunnel, and Cloudflare manages the certificate.**
+Point the tunnel at the add-on's port instead of Actual's, and set
+`PROXY_TLS=off`. Step by step:
+[Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy).
+
+**Can I reach it remotely (VPN, Tailscale, Cloudflare Tunnel)?**
+Yes, the same way you reach Actual: use the proxy port (5007) instead of
+Actual's. For a tunnel or anything else that handles HTTPS for you, see
+[Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy).
 
 **I see a certificate warning every time.**
 That's the self-signed certificate. Accept it once per browser, or
@@ -945,6 +1083,8 @@ Run `docker compose logs asset-tracker-backend | grep asset-tracker`.
 
 **Loans is missing from the sidebar.**
 1. Make sure you're on the proxy port (`:5007`), not Actual's (`:5006`).
+   Through a Cloudflare Tunnel or reverse proxy, check that it points at
+   port 5007.
 2. Hard-reload the page (Ctrl+Shift+R / Cmd+Shift+R). Actual caches its page,
    and the first load after an update can be the old copy.
 3. Make the window wider: Actual's mobile layout has no sidebar.
@@ -965,6 +1105,21 @@ same login.
 The backend lost its connection to Actual. Check the backend log (see
 above). Deleting `data/actual-cache/` and restarting the backend forces a
 fresh download of the budget; your loan data isn't affected.
+
+**Behind Cloudflare: a `502 Bad Gateway` or *Bad gateway* error page.**
+`cloudflared` can't reach the add-on.
+- Check the tunnel's service type matches `PROXY_TLS`: `HTTP` with
+  `PROXY_TLS=off`, `HTTPS` with **No TLS Verify** with `PROXY_TLS=on`.
+  An `HTTPS` service with `PROXY_TLS=off` (or the other way round) fails.
+- With `PROXY_PORT=127.0.0.1:5007`, `cloudflared` has to run on this same
+  machine and use `localhost`. If it runs in Docker without host
+  networking, or on another machine, set `PROXY_PORT=5007` and use this
+  machine's network address.
+
+**Actual says it needs HTTPS, or the page stays blank, on `http://<this-machine>:5007`.**
+With `PROXY_TLS=off` the add-on serves plain HTTP for a tunnel or reverse
+proxy, and Actual doesn't run on plain `http://` addresses. Open it through
+your Cloudflare name instead, or set `PROXY_TLS=on` to use it at home too.
 
 **Actual shows a 502 page through the proxy.**
 Actual is down or still starting. Check `docker ps` and Actual's own logs.
@@ -1041,8 +1196,10 @@ With `?loan=<id>`, you get that one loan. Example for the made-up car loan:
 - `equity` is the asset's latest value minus `owed`. `asset` and `equity`
   are `null` for a loan without an asset. `pmi` is `null` unless the loan
   has PMI; for a mortgage it holds `active`, `monthly`, `dropDate`,
-  `paymentsUntilDrop`, `daysUntilDrop`, `requestRemovalDate` and
-  `automaticRemovalDate`.
+  `paymentsUntilDrop`, `daysUntilDrop`, `requestRemovalDate`,
+  `automaticRemovalDate` and `removalRule`. With `removalRule`
+  `"untilRemoved"` and no removal recorded, `dropDate`, `paymentsUntilDrop`
+  and `daysUntilDrop` are `null`: PMI stays until it's removed.
 - Loan details (servicer, account numbers, notes) are never included.
 - The endpoint never changes anything, and its token can't be used for the
   rest of the API. To change the token, edit `SUMMARY_TOKEN` and run
@@ -1058,6 +1215,7 @@ With `?loan=<id>`, you get that one loan. Example for the made-up car loan:
 
 ```
  browser ──HTTPS──▶  asset-tracker-proxy (nginx) ──▶  Actual (stock image, untouched)
+   (or a Cloudflare Tunnel / reverse proxy in front, with PROXY_TLS=off)
                          │
                          ├── /asset-tracker-addon/*  ─┐
                          └── /asset-tracker-api/*    ─┴─▶ asset-tracker-backend (Node) ──read-only──▶ Actual API
@@ -1171,7 +1329,7 @@ cents.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /health` | Liveness + Actual connection status |
+| `GET /health` | Liveness, and whether Actual is connected (no error text; that's in the loan state) |
 | `GET /v1/summary[?loan=<id>]` | Read-only dashboard summary (own token, see above) |
 | `GET /categories` | Actual's category groups |
 | `GET /loans` | Every loan with what it owes, its equity and next payment |
@@ -1191,6 +1349,8 @@ cents.
 | `POST /loans/:loanId/months/:n/unskip` | Undo a skip |
 | `PUT /loans/:loanId/months/:n/catch-up` | `{ fromPayment, months }`: plan to pay back missed payment *n* |
 | `DELETE /loans/:loanId/months/:n/catch-up` | Remove that plan |
+| `PUT /loans/:loanId/pmi/removal` | `{ fromPayment }`: PMI stopped from this payment on (replaces an earlier record) |
+| `DELETE /loans/:loanId/pmi/removal` | Remove that record |
 | `POST /loans/:loanId/escrow/entries` | `{ date, kind, amount, note }`: an escrow bill or deposit |
 | `DELETE /loans/:loanId/escrow/entries/:id` | Remove an escrow entry |
 | `PUT /loans/:loanId/details` | `{ fields, custom }`: save loan details |
