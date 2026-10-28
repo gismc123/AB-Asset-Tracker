@@ -1,6 +1,6 @@
 import { createRoot, type Root } from 'react-dom/client';
-import { createClient, type MortgageClient } from './api.js';
-import { MortgageApp } from './components/MortgageApp.js';
+import { createClient, type TrackerClient } from './api.js';
+import { TrackerApp } from './components/TrackerApp.js';
 import { styles } from './styles.js';
 
 export interface MountedApp {
@@ -8,11 +8,13 @@ export interface MountedApp {
   syncTheme(): void;
   /** Blur amounts, following Actual's privacy mode. */
   setPrivacy(on: boolean): void;
+  /** Show this loan (from the sidebar list). */
+  selectLoan(loanId: number): void;
   unmount(): void;
 }
 
 /** Actual exposes its theme only as CSS variables, so infer dark from the page color. */
-function isDark(): boolean {
+export function isDark(): boolean {
   const bg = getComputedStyle(document.documentElement).getPropertyValue('--color-pageBackground').trim();
   const m = /^#?([0-9a-f]{6})$/i.exec(bg) ?? /^#?([0-9a-f]{3})$/i.exec(bg);
   let rgb: number[] | null = null;
@@ -29,7 +31,7 @@ function isDark(): boolean {
 }
 
 /** Actual's privacy font, registered by its page (fonts cross into the shadow root). */
-function hasRedactedFont(): boolean {
+export function hasRedactedFont(): boolean {
   try {
     return [...document.fonts].some((f) => f.family.replace(/["']/g, '') === 'Redacted Script');
   } catch {
@@ -37,11 +39,20 @@ function hasRedactedFont(): boolean {
   }
 }
 
+export interface MountOptions {
+  client?: TrackerClient;
+  initialLoan?: number | null;
+  /** Called after anything changes a loan's numbers, e.g. to refresh the sidebar list. */
+  onChange?(): void;
+  /** Called with the loan on screen. */
+  onSelect?(loanId: number | null): void;
+}
+
 /**
- * Render the Mortgage screens into `host` inside a shadow root, so its
- * styles never touch Actual's and the other way round.
+ * Render the loan screens into `host` inside a shadow root, so its styles
+ * never touch Actual's and the other way round.
  */
-export function mountMortgageApp(host: HTMLElement, client: MortgageClient = createClient()): MountedApp {
+export function mountTrackerApp(host: HTMLElement, { client = createClient(), initialLoan = null, onChange, onSelect }: MountOptions = {}): MountedApp {
   const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
   shadow.innerHTML = '';
   const style = document.createElement('style');
@@ -59,12 +70,30 @@ export function mountMortgageApp(host: HTMLElement, client: MortgageClient = cre
   for (const type of KEY_EVENTS) shadow.addEventListener(type, keepKeysInside);
 
   const root: Root = createRoot(container);
-  root.render(<MortgageApp client={client} />);
+  let select: ((loanId: number) => void) | null = null;
+  let pending: number | null = null;
+  root.render(
+    <TrackerApp
+      client={client}
+      initialLoan={initialLoan}
+      onChange={onChange}
+      onSelect={onSelect}
+      bindSelect={(fn) => {
+        select = fn;
+        if (pending !== null) fn(pending);
+        pending = null;
+      }}
+    />,
+  );
 
   const syncTheme = () => container.classList.toggle('dark', isDark());
   syncTheme();
   return {
     syncTheme,
+    selectLoan(loanId) {
+      if (select) select(loanId);
+      else pending = loanId;
+    },
     setPrivacy(on) {
       container.classList.toggle('privacy', on);
       container.classList.toggle('redact', on && hasRedactedFont());

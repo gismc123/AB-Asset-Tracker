@@ -1,10 +1,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import type { LoanModules } from '../../engine/index.js';
 import type { MonthView } from '../../server/service.js';
 import { date, money } from '../format.js';
 import { Amt } from './Amt.js';
 
 interface Props {
   rows: MonthView[];
+  /** PMI and escrow columns only show for loans that have them. */
+  modules: LoanModules;
   currentPayment: number | null;
   onOpen(payment: number): void;
 }
@@ -17,7 +20,10 @@ export function StatusPill({ status }: { status: MonthView['status'] }) {
 }
 
 /** The full amortization schedule, grouped by year. Click a row to reconcile it. */
-export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
+export function ScheduleView({ rows, modules, currentPayment, onOpen }: Props) {
+  const fees = rows.some((r) => r.fee > 0);
+  // #, due, principal, interest, extra, [pmi], [escrow], [fee], total, balance, status
+  const columns = 8 + Number(modules.pmi) + Number(modules.escrow) + Number(fees);
   const [filter, setFilter] = useState<Filter>('all');
   const currentRef = useRef<HTMLTableRowElement>(null);
 
@@ -53,8 +59,9 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
               <th>Principal</th>
               <th>Interest</th>
               <th>Extra</th>
-              <th>PMI</th>
-              <th>Escrow</th>
+              {modules.pmi && <th>PMI</th>}
+              {modules.escrow && <th>Escrow</th>}
+              {fees && <th>Fee</th>}
               <th>Total</th>
               <th>Balance</th>
               <th className="l">Status</th>
@@ -68,7 +75,7 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
                 <Fragment key={r.payment}>
                   {newYear && (
                     <tr className="year">
-                      <td colSpan={10}>{year}</td>
+                      <td colSpan={columns}>{year}</td>
                     </tr>
                   )}
                   <tr
@@ -81,7 +88,7 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
                     <td>{r.payment}</td>
                     <td className="l">{date(r.dueDate)}</td>
                     {r.skipped ? (
-                      <td colSpan={6} className="muted" style={{ textAlign: 'center' }}>
+                      <td colSpan={columns - 4} className="muted" style={{ textAlign: 'center' }}>
                         {r.skipped === 'catchUp' ? (
                           <>Missed · <Amt cents={r.pastDue} /> past due, caught up later</>
                         ) : r.skipped === 'capitalize' ? (
@@ -101,8 +108,9 @@ export function ScheduleView({ rows, currentPayment, onOpen }: Props) {
                           {r.extraPrincipal ? <Amt cents={r.extraPrincipal} /> : '—'}
                           {r.beforeTracking && r.extraPrincipal !== 0 && ' *'}
                         </td>
-                        <td className={r.pmi ? '' : 'muted'}>{r.pmi ? <Amt cents={r.pmi} /> : '—'}</td>
-                        <td><Amt cents={r.escrow} /></td>
+                        {modules.pmi && <td className={r.pmi ? '' : 'muted'}>{r.pmi ? <Amt cents={r.pmi} /> : '—'}</td>}
+                        {modules.escrow && <td><Amt cents={r.escrow} /></td>}
+                        {fees && <td className={r.fee ? '' : 'muted'}>{r.fee ? <Amt cents={r.fee} /> : '—'}</td>}
                         <td
                           style={{ fontWeight: 600 }}
                           title={

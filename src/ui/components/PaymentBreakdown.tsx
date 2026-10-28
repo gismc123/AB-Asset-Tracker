@@ -6,6 +6,7 @@ const PARTS = [
   { key: 'interest', label: 'Interest', color: 'var(--s-interest)' },
   { key: 'pmi', label: 'PMI', color: 'var(--s-pmi)' },
   { key: 'escrow', label: 'Escrow', color: 'var(--s-escrow)' },
+  { key: 'fee', label: 'Yearly fee', color: 'var(--muted)' },
 ] as const;
 
 /** Where one month's payment goes, as a stacked bar with a labeled legend. */

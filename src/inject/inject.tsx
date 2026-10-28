@@ -1,23 +1,27 @@
 /**
  * The one script the proxy injects into Actual's page.
  *
- * It adds a "Mortgage" item to Actual's sidebar and, when clicked, shows the
- * mortgage screens in the content area next to the sidebar. Everything here
- * is defensive: if Actual's markup changes and the sidebar can't be found,
- * the script does nothing and Actual keeps working exactly as before.
+ * It adds a "Loans" item to Actual's sidebar, with each loan listed under
+ * it, and when clicked shows the loan screens in the content area next to
+ * the sidebar. Everything here is defensive: if Actual's markup changes and
+ * the sidebar can't be found, the script does nothing and Actual keeps
+ * working exactly as before.
  */
-import { mountMortgageApp, type MountedApp } from '../ui/mount.js';
+import { createClient } from '../ui/api.js';
+import { TRACKER_ICON_SVG } from '../ui/loanTypes.js';
+import { mountTrackerApp, type MountedApp } from '../ui/mount.js';
+import { mountSidebarLoans, type MountedSidebar } from '../ui/sidebar.js';
 
-const LOG = '[mortgage-tab]';
-const ITEM_ATTR = 'data-mortgage-tab';
+const LOG = '[asset-tracker]';
+const ITEM_ATTR = 'data-asset-tracker';
+const LIST_ATTR = 'data-asset-tracker-list';
+const LABEL = 'Loans';
 /** Sidebar links we try, in order, to find where the menu is and copy its look. */
 const ANCHOR_ROUTES = ['/schedules', '/reports', '/budget'];
-const HOUSE_ICON =
-  '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M10 2.2 1.6 9.1a.8.8 0 0 0 1 1.3l.9-.7V17c0 .6.4 1 1 1h4v-5h3v5h4c.6 0 1-.4 1-1V9.7l.9.7a.8.8 0 1 0 1-1.3L10 2.2Z"/></svg>';
 
 declare global {
   interface Window {
-    __actualMortgageTab?: { open(): void; close(): void };
+    __abAssetTracker?: { open(loanId?: number): void; close(): void };
   }
 }
 
@@ -25,7 +29,7 @@ let warned = false;
 function warnOnce(message: string, err?: unknown) {
   if (warned) return;
   warned = true;
-  console.info(`${LOG} ${message}. Actual works normally; the Mortgage tab is hidden.`, err ?? '');
+  console.info(`${LOG} ${message}. Actual works normally; the Loans item is hidden.`, err ?? '');
 }
 
 function visible(el: Element): boolean {
@@ -35,7 +39,7 @@ function visible(el: Element): boolean {
 
 /**
  * Visible sidebar links: `anchor` is the one to insert after, `template` the
- * one to copy, which must not be the current page or Mortgage would look
+ * one to copy, which must not be the current page or Loans would look
  * selected too.
  */
 function findSidebarLinks(): { anchor: HTMLAnchorElement; template: HTMLAnchorElement } | null {
@@ -43,7 +47,7 @@ function findSidebarLinks(): { anchor: HTMLAnchorElement; template: HTMLAnchorEl
   for (const route of ANCHOR_ROUTES) {
     document.querySelectorAll<HTMLAnchorElement>(`a[href="${route}"]`).forEach((a) => {
       // The sidebar sits on the left; skip links elsewhere (e.g. in page content).
-      if (!a.closest(`[${ITEM_ATTR}]`) && visible(a) && a.getBoundingClientRect().left < window.innerWidth / 3) links.push(a);
+      if (!a.closest(`[${ITEM_ATTR}], [${LIST_ATTR}]`) && visible(a) && a.getBoundingClientRect().left < window.innerWidth / 3) links.push(a);
     });
   }
   const anchor = links[0];
@@ -106,21 +110,21 @@ function buildItem(template: HTMLAnchorElement): HTMLAnchorElement {
   const item = template.cloneNode(true) as HTMLAnchorElement;
   item.setAttribute(ITEM_ATTR, '');
   item.removeAttribute('aria-current');
-  item.href = '#mortgage';
-  item.title = 'Mortgage';
+  item.href = HASH;
+  item.title = LABEL;
 
   // Replace the label: the deepest text node that has visible text.
   const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
   let label: Text | null = null;
   for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.textContent?.trim()) label = n as Text;
-  if (label) label.textContent = 'Mortgage';
-  else item.append('Mortgage');
+  if (label) label.textContent = LABEL;
+  else item.append(LABEL);
 
   // Swap the icon, keeping the size and classes Actual gave the original.
   const oldIcon = item.querySelector('svg');
   if (oldIcon) {
     const tpl = document.createElement('template');
-    tpl.innerHTML = HOUSE_ICON;
+    tpl.innerHTML = TRACKER_ICON_SVG;
     const icon = tpl.content.firstElementChild as SVGElement;
     for (const attr of ['class', 'style', 'width', 'height']) {
       const v = oldIcon.getAttribute(attr);
@@ -131,14 +135,21 @@ function buildItem(template: HTMLAnchorElement): HTMLAnchorElement {
   return item;
 }
 
+// The URL carries #loans while the screen is open, as its own history
+// entry, so Back closes it and reload or a bookmark reopens it.
+const HASH = '#loans';
+
 function start() {
+  const client = createClient();
   let host: HTMLDivElement | null = null;
   let app: MountedApp | null = null;
   let item: HTMLAnchorElement | null = null;
+  let listHost: HTMLDivElement | null = null;
+  let list: MountedSidebar | null = null;
   let openPath: string | null = null;
   let themeTimer = 0;
 
-  // Page-specific top bar controls hidden while the mortgage screen is open.
+  // Page-specific top bar controls hidden while the loans screen is open.
   const hiddenParts = new Set<HTMLElement>();
   const showTitlebarParts = () => {
     for (const el of hiddenParts) el.style.visibility = '';
@@ -168,9 +179,13 @@ function start() {
     }
   };
 
-  const syncPrivacy = () => app?.setPrivacy(actualPrivacyEnabled() ?? false);
+  const syncPrivacy = () => {
+    const on = actualPrivacyEnabled() ?? false;
+    app?.setPrivacy(on);
+    list?.setPrivacy(on);
+  };
 
-  // While the mortgage screen is open, the sidebar should show Mortgage as the
+  // While the loans screen is open, the sidebar should show Loans as the
   // current page, not the page underneath. Actual styles its current link
   // with one class, so swap classes with that link and swap back on close.
   let itemClass = '';
@@ -216,17 +231,14 @@ function start() {
     }
   };
 
-  // The URL carries #mortgage while the screen is open, as its own history
-  // entry, so Back closes it and reload or a bookmark reopens it.
-  const HASH = '#mortgage';
   const pushHash = () => {
     if (location.hash !== HASH) history.pushState(history.state, '', `${location.pathname}${location.search}${HASH}`);
   };
 
-  const open = () => {
+  const open = (loanId?: number) => {
     if (!host) {
       host = document.createElement('div');
-      host.id = 'actual-mortgage-tab';
+      host.id = 'ab-asset-tracker';
       // Above page content (Schedules' sticky header is 200), below Actual's
       // own chrome, menus and notifications (501 and up).
       Object.assign(host.style, {
@@ -236,8 +248,13 @@ function start() {
         background: 'var(--color-pageBackground, #f4f5f8)',
       });
       document.body.appendChild(host);
-      app = mountMortgageApp(host);
-    }
+      app = mountTrackerApp(host, {
+        client,
+        initialLoan: loanId ?? null,
+        onChange: () => list?.refresh(),
+        onSelect: (id) => list?.setCurrent(openPath === null ? null : id),
+      });
+    } else if (loanId !== undefined) app?.selectLoan(loanId);
     // Not the `hidden` attribute: Actual's CSS overrides its display:none.
     host.style.display = 'block';
     pushHash();
@@ -259,19 +276,33 @@ function start() {
   const close = ({ dropHash = false } = {}) => {
     window.clearInterval(themeTimer);
     if (host) host.style.display = 'none';
+    list?.setCurrent(null);
     showTitlebarParts();
     openPath = null;
     markActive(false);
     if (dropHash && location.hash === HASH) history.replaceState(history.state, '', `${location.pathname}${location.search}`);
   };
 
-  // Back and Forward across the #mortgage entry.
+  // Back and Forward across the #loans entry.
   window.addEventListener('popstate', () => {
     if (location.hash === HASH && openPath === null && item) open();
     else if (location.hash !== HASH && openPath !== null) close();
   });
 
+  /** The loans listed under the sidebar item, like Actual lists accounts. */
+  const ensureList = () => {
+    if (!item?.isConnected || (listHost?.isConnected && listHost.previousElementSibling === item)) return;
+    if (!listHost) {
+      listHost = document.createElement('div');
+      listHost.setAttribute(LIST_ATTR, '');
+      list = mountSidebarLoans(listHost, client, (loanId) => open(loanId));
+      syncPrivacy();
+    }
+    item.insertAdjacentElement('afterend', listHost);
+  };
+
   const ensureItem = () => {
+    ensureList();
     if (item?.isConnected) return;
     const found = findSidebarLinks();
     if (!found) return; // not logged in yet, a modal is up, or mobile layout
@@ -283,20 +314,22 @@ function start() {
       if (openPath === null) open();
     });
     found.anchor.insertAdjacentElement('afterend', item);
+    ensureList();
     if (openPath !== null) markActive(true);
     // Reloaded or bookmarked with the screen open.
     else if (location.hash === HASH) open();
   };
 
-  // Following any of Actual's links (sidebar, top bar) leaves the mortgage
+  // Following any of Actual's links (sidebar, top bar) leaves the loans
   // screen. Clicks inside it are retargeted to `host`, so they don't count.
   document.addEventListener(
     'click',
     (e) => {
-      if (openPath === null || !(e.target instanceof Element) || host?.contains(e.target)) return;
+      if (!(e.target instanceof Element)) return;
       // Follow Actual's privacy toggle right away rather than on the next tick.
       // Actual relabels the button once it has saved the setting, so check a few times.
       if (e.target.closest('button[aria-label*="privacy" i]')) for (const ms of [50, 300, 1000]) window.setTimeout(syncPrivacy, ms);
+      if (openPath === null || host?.contains(e.target) || listHost?.contains(e.target)) return;
       const link = e.target.closest('a[href]');
       if (link && !link.hasAttribute(ITEM_ATTR)) close();
     },
@@ -325,7 +358,7 @@ function start() {
   window.addEventListener('resize', () => openPath !== null && layout());
   ensureItem();
 
-  window.__actualMortgageTab = { open, close: () => close({ dropHash: true }) };
+  window.__abAssetTracker = { open, close: () => close({ dropHash: true }) };
 
   // Tell the user once if the sidebar never shows up after login.
   window.setTimeout(() => {
@@ -337,7 +370,7 @@ function start() {
 
 function safeStart() {
   try {
-    if (!window.__actualMortgageTab) start();
+    if (!window.__abAssetTracker) start();
   } catch (err) {
     warnOnce('Failed to start', err);
   }

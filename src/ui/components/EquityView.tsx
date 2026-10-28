@@ -1,36 +1,62 @@
-import { useMemo, useState } from 'react';
-import type { PeriodBasis, PeriodBreakouts, PeriodTotals } from '../../engine/index.js';
-import type { MortgageClient, StateView } from '../api.js';
-import { date, parseDollars, percent } from '../format.js';
+import { useEffect, useMemo, useState } from 'react';
+import type { AssetKind, PeriodBasis, PeriodBreakouts, PeriodTotals, ValueTrend } from '../../engine/index.js';
+import type { AssetRecord, LoanClient, StateView } from '../api.js';
+import { centsToInput, date, parseDollars, percent } from '../format.js';
+import { ASSET_KIND_LABEL, LOAN_TYPE_INFO, VALUE_SOURCES } from '../loanTypes.js';
 import { Amt } from './Amt.js';
 import { TrendChart } from './TrendChart.js';
 
 interface Props {
   state: StateView;
-  client: MortgageClient;
+  client: LoanClient;
   onState(state: StateView): void;
 }
 
-const SOURCES = ['Appraisal', 'Tax assessment', 'Online estimate', 'Broker price opinion'];
-
-/** Equity today, how it was built, where it's heading, and where the payments went. */
+/**
+ * Equity today, how it was built, where it's heading, and where the
+ * payments went. A loan with no asset gets the payment totals and a way to
+ * start tracking one.
+ */
 export function EquityView({ state, client, onState }: Props) {
   const a = state.analysis!;
   const e = a.equity;
-  if (!e) return null;
+  const asset = state.asset;
+  const hasPaid = state.schedule!.rows.some((r) => r.status === 'paid' || r.status === 'history');
+
+  if (!e) {
+    return (
+      <div>
+        <Breakouts periods={a.periods} hasPaid={hasPaid} beforeTracking={!!state.setup?.startingPoint} />
+        <div className="mt-gap" />
+        <div className="mt-grid mt-two">
+          <AssetEditor state={state} client={client} onState={onState} />
+          <div />
+        </div>
+      </div>
+    );
+  }
+
+  const kind: AssetKind = asset?.kind ?? 'home';
+  const noun = ASSET_KIND_LABEL[kind].toLowerCase();
   const pmiActive = state.summary?.pmi.active ?? false;
+  const projected = state.summary?.asset?.projectedValue ?? null;
 
   return (
     <div>
       <div className="mt-grid mt-kpis">
         <div className="mt-card">
-          <div className="mt-kpi-label">Home value</div>
+          <div className="mt-kpi-label">{asset?.name ?? ASSET_KIND_LABEL[kind]} value</div>
           <div className="mt-kpi-value">
             <Amt cents={e.homeValue} whole />
           </div>
           <div className="mt-kpi-note">
-            {e.isEstimate ? `${e.homeValueSource} · ${date(e.homeValueAsOf)}` : 'Original value. Add an estimate below.'}
+            {e.isEstimate ? `${e.homeValueSource} · ${date(e.homeValueAsOf)}` : 'Original value. Add a newer value below.'}
           </div>
+          {projected !== null && (
+            <div className="mt-kpi-note">
+              Projected today: <Amt cents={projected} whole /> (estimate)
+            </div>
+          )}
         </div>
         <div className="mt-card">
           <div className="mt-kpi-label">You owe</div>
@@ -51,10 +77,12 @@ export function EquityView({ state, client, onState }: Props) {
         </div>
         <div className="mt-card">
           <div className="mt-kpi-label">Equity</div>
-          <div className="mt-kpi-value">
+          <div className={`mt-kpi-value ${e.equity < 0 ? 'neg' : ''}`}>
             <Amt cents={e.equity} whole />
           </div>
-          <div className="mt-kpi-note">{percent(e.equityPercent)} of the home's value</div>
+          <div className="mt-kpi-note">
+            {e.equity < 0 ? `You owe more than the ${noun} is worth` : `${percent(e.equityPercent)} of the ${noun}'s value`}
+          </div>
         </div>
         <div className="mt-card">
           <div className="mt-kpi-label">Loan-to-value</div>
@@ -75,8 +103,8 @@ export function EquityView({ state, client, onState }: Props) {
 
       <div className="mt-gap" />
       <div className="mt-grid mt-two">
-        <EquityParts state={state} />
-        <HomeValues state={state} client={client} onState={onState} />
+        <EquityParts state={state} kind={kind} />
+        <AssetValues state={state} client={client} onState={onState} kind={kind} />
       </div>
 
       <div className="mt-gap" />
@@ -89,7 +117,10 @@ export function EquityView({ state, client, onState }: Props) {
             points={e.projection.map((p) => ({ date: p.dueDate, value: p.equity, note: `Payment #${p.payment}` }))}
           />
           <div className="mt-kpi-note" style={{ marginTop: 8 }}>
-            Solid: payments made. Dashed: the schedule ahead, at today's home value.
+            Solid: payments made. Dashed: the schedule ahead,{' '}
+            {e.projected
+              ? `with the ${noun}'s value following its projected yearly ${asset?.valueTrend === 'depreciating' ? 'drop' : 'rise'} of ${asset?.trendRatePercent}% (an estimate).`
+              : `at today's ${noun} value.`}
           </div>
         </div>
         <div className="mt-card">
@@ -99,11 +130,11 @@ export function EquityView({ state, client, onState }: Props) {
               <div className="mt-milestone" key={m.percent}>
                 <span className={`mt-dot ${m.reached ? 'done' : ''}`} aria-hidden="true" />
                 <div>
-                  <div className="t">{m.percent === 100 ? 'Paid off' : `${m.percent}% equity`}</div>
-                  <div className="d">{milestoneText(m.percent)}</div>
+                  <div className="t">{m.percent === 100 ? 'Paid off' : m.percent === 0 ? 'Worth more than you owe' : `${m.percent}% equity`}</div>
+                  <div className="d">{milestoneText(m.percent, kind)}</div>
                 </div>
                 <div className="r">
-                  {m.reached ? 'Reached' : date(m.dueDate)}
+                  {m.reached ? 'Reached' : m.dueDate ? date(m.dueDate) : 'Not on this schedule'}
                   <div className="d">{m.payment ? `payment #${m.payment}` : ''}</div>
                 </div>
               </div>
@@ -113,34 +144,52 @@ export function EquityView({ state, client, onState }: Props) {
       </div>
 
       <div className="mt-gap" />
-      <Breakouts
-        periods={a.periods}
-        hasPaid={state.schedule!.rows.some((r) => r.status === 'paid' || r.status === 'history')}
-        beforeTracking={!!state.setup?.startingPoint}
-      />
+      <Breakouts periods={a.periods} hasPaid={hasPaid} beforeTracking={!!state.setup?.startingPoint} />
+      <div className="mt-gap" />
+      <div className="mt-grid mt-two">
+        <AssetEditor state={state} client={client} onState={onState} />
+        <div />
+      </div>
     </div>
   );
 }
 
-function milestoneText(p: number): string {
-  if (p === 20) return 'Typical point where PMI can be dropped';
-  if (p === 22) return 'Matches the 78% automatic PMI line';
-  if (p === 25) return 'Common cutoff for appraisal-based PMI removal';
-  if (p === 50) return 'You own more of the home than the lender';
+function milestoneText(p: number, kind: AssetKind): string {
+  if (kind === 'home') {
+    if (p === 20) return 'Typical point where PMI can be dropped';
+    if (p === 22) return 'Matches the 78% automatic PMI line';
+    if (p === 25) return 'Common cutoff for appraisal-based PMI removal';
+    if (p === 50) return 'You own more of the home than the lender';
+    if (p === 75) return 'Three quarters owned';
+    return 'The home is yours outright';
+  }
+  const noun = ASSET_KIND_LABEL[kind].toLowerCase();
+  if (p === 0) return `Selling the ${noun} would cover the loan`;
+  if (p === 25) return 'A quarter of its value is yours';
+  if (p === 50) return 'You own more of it than the lender';
   if (p === 75) return 'Three quarters owned';
-  return 'The home is yours outright';
+  return `The ${noun} is yours outright`;
 }
 
-function EquityParts({ state }: { state: StateView }) {
+function EquityParts({ state, kind }: { state: StateView; kind: AssetKind }) {
   const e = state.analysis!.equity!;
+  const dp = e.parts.downPayment;
+  const splitStart = dp !== null && dp !== e.parts.startingEquity;
   const parts = [
-    { label: 'Down payment', note: 'Original value minus the amount borrowed', value: e.parts.startingEquity },
+    splitStart
+      ? { label: 'Starting equity', note: 'Price minus the amount borrowed', value: e.parts.startingEquity }
+      : { label: 'Down payment', note: 'Original value minus the amount borrowed', value: e.parts.startingEquity },
     { label: 'Principal paid', note: 'From regular payments', value: e.parts.principalPaid },
     { label: 'Extra principal', note: 'Paid on top of the schedule', value: e.parts.extraPrincipal },
     { label: 'Extra before tracking', note: 'Starting balance vs. the original schedule', value: e.parts.extraBeforeTracking },
-    { label: 'Home value change', note: e.isEstimate ? `Since purchase, per ${e.homeValueSource.toLowerCase()}` : 'Add an estimate to include it', value: e.parts.marketChange, always: !e.isEstimate },
+    {
+      label: 'Value change',
+      note: e.isEstimate ? `Since purchase, per ${e.homeValueSource.toLowerCase()}` : 'Add a newer value to include it',
+      value: e.parts.marketChange,
+      always: !e.isEstimate,
+    },
     { label: 'Skipped payments', note: 'Interest added, or payments deferred or not yet caught up', value: e.parts.skipped },
-  ].filter((p, i) => i < 2 || p.value !== 0 || p.always);
+  ].filter((p, i) => i < 2 || p.value !== 0 || ('always' in p && p.always));
   const max = Math.max(1, ...parts.map((p) => Math.abs(p.value)));
 
   return (
@@ -169,15 +218,28 @@ function EquityParts({ state }: { state: StateView }) {
           </div>
         </div>
       </div>
+      {splitStart && (
+        <div className="mt-kpi-note" style={{ marginTop: 10 }}>
+          Your down payment was <Amt cents={dp} />. The rest of the starting equity is the gap between the price and what you
+          borrowed (fees or a trade-in, for example).
+        </div>
+      )}
+      {kind === 'vehicle' && (
+        <div className="mt-kpi-note" style={{ marginTop: 10 }}>
+          Vehicles usually lose value faster than the loan is paid down at first, so equity can start below zero.
+        </div>
+      )}
     </div>
   );
 }
 
-function HomeValues({ state, client, onState }: Props) {
-  const [d, setD] = useState({ date: state.today, value: '', source: 'Online estimate' });
+function AssetValues({ state, client, onState, kind }: Props & { kind: AssetKind }) {
+  const [d, setD] = useState({ date: state.today, value: '', source: VALUE_SOURCES[kind][kind === 'home' ? 2 : 0]! });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const values = [...(state.asset?.values ?? [])].reverse();
+  const asset = state.asset;
+  const values = [...(asset?.values ?? [])].reverse();
+  const noun = ASSET_KIND_LABEL[kind].toLowerCase();
 
   const run = async (fn: () => Promise<StateView>) => {
     setBusy(true);
@@ -194,19 +256,20 @@ function HomeValues({ state, client, onState }: Props) {
   };
   const add = async (ev: React.FormEvent) => {
     ev.preventDefault();
+    if (!asset) return setError(`Save the ${noun} below first`);
     const cents = parseDollars(d.value);
     if (!cents || cents <= 0) return setError('Enter the value, like 410,000');
-    if (await run(() => client.addHomeValue({ date: d.date, value: cents, source: d.source.trim() || 'Estimate' }))) {
+    if (await run(() => client.addAssetValue(asset.id, { date: d.date, value: cents, source: d.source.trim() || 'Estimate' }))) {
       setD((p) => ({ ...p, value: '' }));
     }
   };
 
   return (
     <div className="mt-card">
-      <h3>Home value</h3>
+      <h3>{ASSET_KIND_LABEL[kind]} value</h3>
       {values.length === 0 ? (
         <p className="mt-kpi-note" style={{ marginTop: 0 }}>
-          Equity uses your original home value until you add an estimate. The newest estimate is used.
+          Equity uses the original value until you add a newer one. The newest value is used.
         </p>
       ) : (
         <table className="mt-data" style={{ marginBottom: 12 }}>
@@ -222,7 +285,7 @@ function HomeValues({ state, client, onState }: Props) {
                   <Amt cents={v.value} whole />
                 </td>
                 <td style={{ width: 1 }}>
-                  <button type="button" className="mt-x" aria-label={`Remove the ${date(v.date)} estimate`} disabled={busy} onClick={() => run(() => client.deleteHomeValue(v.id))}>
+                  <button type="button" className="mt-x" aria-label={`Remove the ${date(v.date)} value`} disabled={busy} onClick={() => run(() => client.deleteAssetValue(asset!.id, v.id))}>
                     ✕
                   </button>
                 </td>
@@ -240,20 +303,20 @@ function HomeValues({ state, client, onState }: Props) {
           <label htmlFor="mt-hv-value">Value</label>
           <div className="mt-prefix">
             <span>$</span>
-            <input id="mt-hv-value" className="mt-input" inputMode="decimal" placeholder="410,000" value={d.value} onChange={(ev) => setD({ ...d, value: ev.target.value })} />
+            <input id="mt-hv-value" className="mt-input" inputMode="decimal" placeholder={kind === 'home' ? '410,000' : '24,000'} value={d.value} onChange={(ev) => setD({ ...d, value: ev.target.value })} />
           </div>
         </div>
         <div className="mt-field">
           <label htmlFor="mt-hv-source">Source</label>
           <input id="mt-hv-source" className="mt-input" list="mt-hv-sources" value={d.source} onChange={(ev) => setD({ ...d, source: ev.target.value })} />
           <datalist id="mt-hv-sources">
-            {SOURCES.map((s) => (
+            {VALUE_SOURCES[kind].map((s) => (
               <option key={s} value={s} />
             ))}
           </datalist>
         </div>
         <button type="submit" className="mt-btn" disabled={busy}>
-          Add estimate
+          Add value
         </button>
       </form>
       {error && (
@@ -261,10 +324,146 @@ function HomeValues({ state, client, onState }: Props) {
           {error}
         </div>
       )}
-      <div className="mt-kpi-note" style={{ marginTop: 10 }}>
-        PMI dates on the Overview always use the original value, as lenders do.
-      </div>
+      {kind === 'home' && state.setup && state.summary?.pmi.hasPmi && (
+        <div className="mt-kpi-note" style={{ marginTop: 10 }}>
+          PMI dates on the Overview always use the original value, as lenders do.
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Create the loan's asset, or edit its name, original value and value trend. */
+function AssetEditor({ state, client, onState }: Props) {
+  const asset = state.asset;
+  const defaultKind: AssetKind = LOAN_TYPE_INFO[state.loan.type].assetKind ?? 'other';
+  const fromAsset = (a: AssetRecord | null) => ({
+    name: a?.name ?? '',
+    kind: a?.kind ?? defaultKind,
+    value: centsToInput(a?.originalValue),
+    trend: a?.valueTrend ?? ('manual' as ValueTrend),
+    rate: a?.trendRatePercent === null || a?.trendRatePercent === undefined ? '' : String(a.trendRatePercent),
+    acquired: a?.acquiredDate ?? state.setup?.openDate ?? '',
+  });
+  const [d, setD] = useState(() => fromAsset(asset));
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  // Follow saves (and switching loans) without losing an edit in progress otherwise.
+  useEffect(() => setD(fromAsset(asset)), [asset]);
+
+  const problems = useMemo(() => {
+    const out: string[] = [];
+    if (!d.name.trim()) out.push('Give it a name');
+    const v = parseDollars(d.value);
+    if (v === null || v < 0) out.push('Enter what it cost');
+    if (d.trend !== 'manual' && !(Number(d.rate) > 0 && Number(d.rate) <= 100)) out.push('The yearly change has to be between 0 and 100 percent');
+    return out;
+  }, [d]);
+
+  const save = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (problems.length) return setError(problems.join('. '));
+    setBusy(true);
+    setError(null);
+    try {
+      onState(
+        await client.saveAsset({
+          name: d.name.trim(),
+          kind: d.kind,
+          originalValue: parseDollars(d.value) ?? 0,
+          valueTrend: d.trend,
+          trendRatePercent: d.trend === 'manual' ? null : Number(d.rate),
+          acquiredDate: d.acquired || null,
+        }),
+      );
+      setSaved(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!asset && !open) {
+    return (
+      <div className="mt-card">
+        <h3>Track what this loan paid for</h3>
+        <p style={{ marginTop: 0 }}>
+          Add the asset (a vehicle, equipment, anything with resale value) to see equity: what it's worth minus what you owe.
+        </p>
+        <button type="button" className="mt-btn" onClick={() => setOpen(true)}>
+          Add an asset
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form className="mt-card" onSubmit={save}>
+      <h3>{asset ? `About the ${ASSET_KIND_LABEL[asset.kind].toLowerCase()}` : 'New asset'}</h3>
+      <div className="mt-form-section">
+        <div className="mt-field">
+          <label htmlFor="mt-as-name">Name</label>
+          <input id="mt-as-name" className="mt-input" maxLength={80} value={d.name} onChange={(e) => { setSaved(false); setD({ ...d, name: e.target.value }); }} />
+        </div>
+        <div className="mt-field">
+          <label htmlFor="mt-as-kind">Kind</label>
+          <select id="mt-as-kind" className="mt-select" style={{ width: '100%' }} value={d.kind} onChange={(e) => { setSaved(false); setD({ ...d, kind: e.target.value as AssetKind }); }}>
+            <option value="home">Home</option>
+            <option value="vehicle">Vehicle</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div className="mt-field">
+          <label htmlFor="mt-as-value">Original value</label>
+          <div className="mt-prefix">
+            <span>$</span>
+            <input id="mt-as-value" className="mt-input" inputMode="decimal" value={d.value} onChange={(e) => { setSaved(false); setD({ ...d, value: e.target.value }); }} />
+          </div>
+          <div className="hint">What it cost. Equity uses this until you add a newer value.</div>
+        </div>
+        <div className="mt-field">
+          <label htmlFor="mt-as-acquired">Bought on</label>
+          <input id="mt-as-acquired" type="date" className="mt-input" value={d.acquired} onChange={(e) => { setSaved(false); setD({ ...d, acquired: e.target.value }); }} />
+        </div>
+        <div className="mt-field">
+          <label htmlFor="mt-as-trend">Value over time</label>
+          <select id="mt-as-trend" className="mt-select" style={{ width: '100%' }} value={d.trend} onChange={(e) => { setSaved(false); setD({ ...d, trend: e.target.value as ValueTrend }); }}>
+            <option value="manual">Only the values I enter</option>
+            <option value="depreciating">Project a yearly drop (estimate)</option>
+            <option value="appreciating">Project a yearly rise (estimate)</option>
+          </select>
+        </div>
+        {d.trend !== 'manual' && (
+          <div className="mt-field">
+            <label htmlFor="mt-as-rate">Yearly change</label>
+            <div className="mt-suffix">
+              <input id="mt-as-rate" className="mt-input" inputMode="decimal" value={d.rate} onChange={(e) => { setSaved(false); setD({ ...d, rate: e.target.value }); }} />
+              <span>%</span>
+            </div>
+          </div>
+        )}
+      </div>
+      {d.trend !== 'manual' && (
+        <p className="mt-kpi-note">
+          The projection only draws the curve ahead. It's an estimate, not a valuation: equity today always uses the latest value you entered.
+        </p>
+      )}
+      {error && (
+        <div className="mt-note bad" style={{ marginTop: 10 }} role="alert">
+          {error}
+        </div>
+      )}
+      <div className="mt-row" style={{ marginTop: 12 }}>
+        <span className="mt-spacer" />
+        {saved && <span style={{ color: 'var(--good)', fontWeight: 600 }}>Saved</span>}
+        <button type="submit" className="mt-btn primary" disabled={busy}>
+          {asset ? 'Save' : 'Add asset'}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -274,8 +473,12 @@ const ROWS: { key: keyof PeriodTotals; label: string; color?: string }[] = [
   { key: 'interest', label: 'Interest', color: 'var(--s-interest)' },
   { key: 'pmi', label: 'PMI', color: 'var(--s-pmi)' },
   { key: 'escrow', label: 'Escrow', color: 'var(--s-escrow)' },
+  { key: 'fees', label: 'Yearly fees' },
   { key: 'deferredRepaid', label: 'Deferred balance repaid' },
 ];
+
+/** Shown even when zero; the rest only appear when some period has them. */
+const ALWAYS: (keyof PeriodTotals)[] = ['principal', 'interest'];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -292,7 +495,7 @@ function Breakouts({ periods, hasPaid, beforeTracking }: { periods: Record<Perio
       { id: 'full', label: 'Life of loan', sub: 'Paid and scheduled', t: p.fullLoan.totals },
     ];
   }, [p]);
-  const rows = ROWS.filter((r) => r.key !== 'extraPrincipal' && r.key !== 'deferredRepaid' ? true : cols.some((c) => c.t[r.key] !== 0));
+  const rows = ROWS.filter((r) => ALWAYS.includes(r.key) || cols.some((c) => c.t[r.key] !== 0));
   const skipped = cols.some((c) => c.t.skipped > 0);
 
   return (
@@ -370,7 +573,7 @@ function Breakouts({ periods, hasPaid, beforeTracking }: { periods: Record<Perio
       </div>
       <div className="mt-kpi-note" style={{ marginTop: 10 }}>
         {basis === 'paid'
-          ? 'Reconciled payments, by the date your bank paid them. Your servicer’s year-end statement (Form 1098) counts interest the same way.'
+          ? 'Reconciled payments, by the date your bank paid them. Year-end lender statements (such as Form 1098) count interest the same way.'
           : 'Every payment due in each period, whether or not it has been reconciled yet.'}{' '}
         Life of loan always includes the payments still to come.
         {beforeTracking &&

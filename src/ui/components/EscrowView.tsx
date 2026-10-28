@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { ESCROW_KINDS, type EscrowKind, type EscrowYear } from '../../engine/index.js';
-import type { MortgageClient, StateView } from '../api.js';
+import type { LoanClient, StateView } from '../api.js';
 import { date, parseDollars } from '../format.js';
 import { Amt } from './Amt.js';
 import { TrendChart } from './TrendChart.js';
 
 interface Props {
   state: StateView;
-  client: MortgageClient;
+  client: LoanClient;
   onState(state: StateView): void;
 }
 

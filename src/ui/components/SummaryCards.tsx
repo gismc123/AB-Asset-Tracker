@@ -2,7 +2,7 @@ import type { LoanSummary } from '../../engine/index.js';
 import { date, money, percent } from '../format.js';
 import { Amt } from './Amt.js';
 
-/** The four headline numbers: payment number, balance, percent paid, equity. */
+/** The four headline numbers: payment number, balance, percent paid, and equity (or payoff, without an asset). */
 export function SummaryCards({ summary }: { summary: LoanSummary }) {
   const n = summary.lastPaidPayment ?? 0;
   return (
@@ -36,22 +36,29 @@ export function SummaryCards({ summary }: { summary: LoanSummary }) {
           <span style={{ width: `${Math.min(100, summary.percentPaid)}%` }} />
         </div>
       </div>
-      <div className="mt-card">
-        <div className="mt-kpi-label">Equity</div>
-        {summary.homeValue && summary.marketEquity !== null ? (
-          <>
-            <div className="mt-kpi-value"><Amt cents={summary.marketEquity} whole /></div>
-            <div className="mt-kpi-note">
-              {percent(summary.marketEquityPercent ?? 0)} of <Amt cents={summary.homeValue.value} whole /> ({date(summary.homeValue.date, 'month')} estimate)
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="mt-kpi-value"><Amt cents={summary.equity ?? 0} whole /></div>
-            <div className="mt-kpi-note">{percent(summary.equityPercent ?? 0)} of original home value</div>
-          </>
-        )}
-      </div>
+      {summary.asset ? (
+        <div className="mt-card">
+          <div className="mt-kpi-label">Equity</div>
+          <div className="mt-kpi-value"><Amt cents={summary.asset.equity} whole /></div>
+          <div className="mt-kpi-note">
+            {summary.asset.valueEntered ? (
+              <>
+                {percent(summary.asset.equityPercent)} of <Amt cents={summary.asset.value} whole /> ({date(summary.asset.valueDate, 'month')} {summary.asset.valueSource.toLowerCase()})
+              </>
+            ) : (
+              <>{percent(summary.asset.equityPercent)} of the original {summary.asset.kind === 'home' ? 'home value' : 'value'}</>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-card">
+          <div className="mt-kpi-label">Payoff today</div>
+          <div className="mt-kpi-value">{summary.payoff ? <Amt cents={summary.payoff.amount} /> : '—'}</div>
+          <div className="mt-kpi-note">
+            {summary.payoff?.source === 'quote' ? `Lender's quote, good through ${date(summary.payoff.asOf)}` : summary.payoff ? 'Estimate: balance plus interest since the last payment' : 'Paid off'}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
