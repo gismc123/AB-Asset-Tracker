@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { MAX_PENNY_OFFSET, type Resolution, type SkipMode } from '../../engine/index.js';
+import { MAX_PENNY_OFFSET, type LoanModules, type Resolution, type SkipMode } from '../../engine/index.js';
 import type { MonthView, StateView } from '../../server/service.js';
-import type { Candidate, CategoryGroup, MortgageClient } from '../api.js';
+import type { Candidate, CategoryGroup, LoanClient } from '../api.js';
 import { date, money } from '../format.js';
 import { PaymentBreakdown } from './PaymentBreakdown.js';
 import { StatusPill } from './ScheduleView.js';
 import { Amt } from './Amt.js';
 
 interface Props {
-  client: MortgageClient;
+  client: LoanClient;
   rows: MonthView[];
   /** Recorded adjustments, to find the catch-up plan for a missed month. */
   adjustments: StateView['adjustments'];
+  /** Escrow and PMI answers only make sense when the loan has them. */
+  modules: LoanModules;
   payment: number;
   onPaymentChange(payment: number): void;
   categoryId: string | null;
@@ -33,7 +35,7 @@ const SKIP_MODES: { value: SkipMode; title: string; text: string }[] = [
   {
     value: 'catchUp',
     title: 'Missed now, caught up later',
-    text: 'A hardship grace period. Nothing is forgiven: the missed payment (with its PMI and escrow) is paid back in later months. No interest is added and the loan doesn’t get longer.',
+    text: 'A hardship grace period. Nothing is forgiven: the whole missed payment is paid back in later months. No interest is added and the loan doesn’t get longer.',
   },
   {
     value: 'capitalize',
@@ -48,10 +50,10 @@ const SKIP_MODES: { value: SkipMode; title: string; text: string }[] = [
 ];
 
 /** Likeliest explanations first, matching the backend's suggestions. */
-function ordered(diff: number) {
+function ordered(diff: number, modules: LoanModules) {
   const order: Resolution[] =
     diff > 0 ? ['rounding', 'extraPrincipal', 'escrow', 'pmi'] : ['rounding', 'escrow', 'pmi', 'extraPrincipal'];
-  return order.map((v) => ANSWERS.find((a) => a.value === v)!);
+  return order.filter((v) => (v === 'escrow' ? modules.escrow : v === 'pmi' ? modules.pmi : true)).map((v) => ANSWERS.find((a) => a.value === v)!);
 }
 
 function possible(answer: Resolution, diff: number, row: MonthView): boolean {
@@ -62,7 +64,7 @@ function possible(answer: Resolution, diff: number, row: MonthView): boolean {
 }
 
 /** One month: pick the category, click the bank transaction, answer if flagged. */
-export function ReconcileView({ client, rows, adjustments, payment, onPaymentChange, categoryId, onCategoryChange, onState, onRefresh }: Props) {
+export function ReconcileView({ client, rows, adjustments, modules, payment, onPaymentChange, categoryId, onCategoryChange, onState, onRefresh }: Props) {
   const row = rows[payment - 1];
   const [groups, setGroups] = useState<CategoryGroup[] | null>(null);
   const [cands, setCands] = useState<Candidate[] | null>(null);
@@ -205,7 +207,7 @@ export function ReconcileView({ client, rows, adjustments, payment, onPaymentCha
                 </span>
               </div>
               <div className="mt-answers">
-                {ordered(diff).map((a, i, all) => {
+                {ordered(diff, modules).map((a, i, all) => {
                   const ok = possible(a.value, diff, row);
                   const suggested = ok && all.slice(0, i).every((b) => !possible(b.value, diff, row));
                   return (
@@ -236,11 +238,11 @@ export function ReconcileView({ client, rows, adjustments, payment, onPaymentCha
               <div className="mt-row" style={{ marginBottom: 12 }}>
                 <select
                   className="mt-select"
-                  aria-label="Mortgage category"
+                  aria-label="Category for this loan's payments"
                   value={categoryId ?? ''}
                   onChange={(e) => onCategoryChange(e.target.value || null)}
                 >
-                  <option value="">Choose your mortgage category…</option>
+                  <option value="">Choose the category for this loan's payments…</option>
                   {groups?.map((g) => (
                     <optgroup key={g.id} label={g.name}>
                       {g.categories.map((c) => (
@@ -258,7 +260,7 @@ export function ReconcileView({ client, rows, adjustments, payment, onPaymentCha
                 )}
               </div>
 
-              {!categoryId && <div className="mt-empty">Pick the category you use for mortgage payments.</div>}
+              {!categoryId && <div className="mt-empty">Pick the category this loan's payments are booked to in Actual.</div>}
               {categoryId && cands === null && !error && <div className="mt-empty">Looking for transactions…</div>}
               {categoryId && cands?.length === 0 && (
                 <div className="mt-empty">
@@ -325,7 +327,11 @@ export function ReconcileView({ client, rows, adjustments, payment, onPaymentCha
                   <button type="button" className="mt-btn" disabled={busy} onClick={skip}>
                     Mark payment #{row.payment} as skipped
                   </button>
-                  <span style={{ color: 'var(--muted)', fontSize: 12 }}>No PMI or escrow is collected for a skipped month.</span>
+                  {(modules.pmi || modules.escrow) && (
+                    <span style={{ color: 'var(--muted)', fontSize: 12 }}>
+                      No {modules.pmi && modules.escrow ? 'PMI or escrow' : modules.pmi ? 'PMI' : 'escrow'} is collected for a skipped month, except when it's caught up later.
+                    </span>
+                  )}
                 </div>
               </details>
             </>
@@ -365,7 +371,7 @@ interface CatchUpProps {
   busy: boolean;
   onUndo(): void;
   run(fn: () => Promise<void>): Promise<void>;
-  client: MortgageClient;
+  client: LoanClient;
   onState(state: StateView): void;
 }
 

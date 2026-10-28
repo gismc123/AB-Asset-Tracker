@@ -3,6 +3,7 @@ import {
   analyzeEquity,
   escrowReport,
   generateSchedule,
+  homeAssetFor,
   lockRow,
   periodBreakouts,
   summarize,
@@ -184,10 +185,10 @@ describe('equity analysis', () => {
   });
 
   it('uses the latest home value estimate and shows the market change', () => {
-    const e = analyzeEquity(setup, plain, paidThrough(3), '2025-06-15', [
+    const e = analyzeEquity(setup, plain, paidThrough(3), '2025-06-15', homeAssetFor(setup, [
       { date: '2025-05-01', value: 38_000_000, source: 'Online estimate' },
       { date: '2025-06-01', value: 40_000_000, source: 'Appraisal' },
-    ]);
+    ]));
     expect(e).toMatchObject({ homeValue: 40_000_000, homeValueSource: 'Appraisal', isEstimate: true });
     expect(e.parts.marketChange).toBe(2_500_000);
     const p = e.parts;

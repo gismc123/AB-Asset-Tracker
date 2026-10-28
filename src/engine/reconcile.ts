@@ -1,4 +1,4 @@
-import { standingExtraAt } from './amortize.js';
+import { modulesOf, standingExtraAt } from './amortize.js';
 import type { Adjustment, Cents, LoanSetup, ScheduleRow } from './types.js';
 
 /** What the user says a payment difference was. */
@@ -59,12 +59,14 @@ export function resolutionToAdjustment(
       return { kind: 'pennyOffset', payment: k, amount: difference };
 
     case 'escrow': {
+      if (!modulesOf(setup).escrow) throw new ResolutionError('This loan has no escrow');
       const amount = row.escrow + difference;
       if (amount < 0) throw new ResolutionError('That would make escrow negative');
       return { kind: 'escrow', fromPayment: k, amount };
     }
 
     case 'pmi': {
+      if (!modulesOf(setup).pmi) throw new ResolutionError('This loan has no PMI');
       const amount = row.pmi + difference;
       if (amount < 0) throw new ResolutionError('That would make PMI negative');
       return { kind: 'pmi', fromPayment: k, amount };

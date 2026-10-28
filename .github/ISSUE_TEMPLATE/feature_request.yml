@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest something new or a change to how something works.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the situation or the problem, not only the solution. For example "my car loan charges a fee every quarter".
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you'd like it to work. Screens, numbers or examples are welcome (made-up numbers only, please).
+    validations:
+      required: true
+  - type: dropdown
+    id: loan-type
+    attributes:
+      label: Which loans does it affect?
+      multiple: true
+      options:
+        - Mortgage
+        - Auto loan
+        - Personal loan
+        - A new kind of loan or asset
+        - All of them
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How do you handle it today?
+      description: Any workaround you use now, in the tracker or elsewhere.
+  - type: checkboxes
+    id: read-only
+    attributes:
+      label: Read-only toward Actual
+      options:
+        - label: I understand the tracker only reads from Actual and never writes to the budget.
+          required: true

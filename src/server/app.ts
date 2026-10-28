@@ -4,11 +4,12 @@ import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { SourceUnavailable } from './actual.js';
 import type { LoanSummary } from '../engine/index.js';
+import type { LoanRecord } from './db.js';
 import type { TokenValidator } from './auth.js';
-import { HttpError, type MortgageService } from './service.js';
+import { HttpError, type TrackerService } from './service.js';
 
 export interface AppDeps {
-  service: MortgageService;
+  service: TrackerService;
   validateToken: TokenValidator;
   /** Folder with the built inject.js. */
   uiDir: string;
@@ -17,8 +18,8 @@ export interface AppDeps {
 }
 
 /** Mount points shared with the proxy config. */
-export const API_PREFIX = '/mortgage-api';
-export const ADDON_PREFIX = '/mortgage-addon';
+export const API_PREFIX = '/asset-tracker-api';
+export const ADDON_PREFIX = '/asset-tracker-addon';
 
 function sameToken(given: string | undefined, expected: string): boolean {
   if (!given) return false;
@@ -27,17 +28,15 @@ function sameToken(given: string | undefined, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-const paymentParam = (req: Request) => {
-  const n = Number(req.params.payment);
-  if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Payment number must be a positive whole number');
+const intParam = (req: Request, name: string, label = name) => {
+  const n = Number(req.params[name]);
+  if (!Number.isInteger(n) || n < 1) throw new HttpError(400, `${label} must be a positive whole number`);
   return n;
 };
+const paymentParam = (req: Request) => intParam(req, 'payment', 'Payment number');
+const idParam = (req: Request) => intParam(req, 'id');
 
-const idParam = (req: Request) => {
-  const n = Number(req.params.id);
-  if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'id must be a positive whole number');
-  return n;
-};
+let warnedQueryToken = false;
 
 export function createApp(deps: AppDeps) {
   const { service } = deps;
@@ -50,7 +49,7 @@ export function createApp(deps: AppDeps) {
     const file = path.join(deps.uiDir, 'inject.js');
     if (!fs.existsSync(file)) {
       // Serve a harmless no-op so Actual keeps working even if the build is missing.
-      res.type('application/javascript').send('console.warn("[mortgage] add-on UI is not built");');
+      res.type('application/javascript').send('console.warn("[asset-tracker] add-on UI is not built");');
       return;
     }
     // COEP require-corp on Actual's page: same-origin is fine, but be explicit.
@@ -65,19 +64,35 @@ export function createApp(deps: AppDeps) {
     res.json({ ok: true, actual: service.sourceStatus() });
   });
 
-  // --- read-only summary for dashboards (e.g. a future MagicMirror module) --
+  // --- read-only summary for dashboards --------------------------------------
   // Opt-in with its own token, because a dashboard can't log in to Actual.
+  // Send it as "Authorization: Bearer <token>". The ?token= query form still
+  // works but is deprecated: query strings end up in logs and browser history.
   api.get('/v1/summary', (req, res) => {
     if (!deps.summaryToken) {
       throw new HttpError(404, 'The summary endpoint is disabled. Set SUMMARY_TOKEN in .env to enable it.');
     }
-    const header = req.get('authorization')?.replace(/^Bearer\s+/i, '');
-    const given = typeof req.query.token === 'string' ? req.query.token : header;
-    if (!sameToken(given, deps.summaryToken)) throw new HttpError(401, 'Missing or wrong summary token');
-    const summary = service.summary();
-    if (!summary) throw new HttpError(409, 'The loan has not been set up yet');
+    const bearer = /^Bearer\s+(.+)$/i.exec(req.get('authorization') ?? '')?.[1];
+    const query = typeof req.query.token === 'string' ? req.query.token : undefined;
+    if (!sameToken(bearer ?? query, deps.summaryToken)) throw new HttpError(401, 'Missing or wrong summary token');
+    if (!bearer && query) {
+      res.set('Deprecation', 'true');
+      res.set('Warning', '299 - "The token query parameter is deprecated; send Authorization: Bearer <token>"');
+      if (!warnedQueryToken) {
+        warnedQueryToken = true;
+        console.warn('[asset-tracker] a dashboard passed the summary token as ?token=. Switch it to the Authorization: Bearer header.');
+      }
+    }
     res.set('Cache-Control', 'no-store');
-    res.json(summaryForDisplay(summary));
+    if (req.query.loan !== undefined) {
+      const id = Number(req.query.loan);
+      if (!Number.isInteger(id) || id < 1) throw new HttpError(400, 'loan must be a loan id');
+      const { loan, summary } = service.summaryFor(id);
+      res.json({ version: SUMMARY_VERSION, ...summaryForDisplay(loan, summary) });
+      return;
+    }
+    const loans = service.summaries().map(({ loan, summary }) => summaryForDisplay(loan, summary));
+    res.json({ version: SUMMARY_VERSION, asOf: service.asOf(), loans });
   });
 
   // --- everything below needs a valid Actual session ------------------------
@@ -90,59 +105,99 @@ export function createApp(deps: AppDeps) {
     next();
   });
 
-  api.get('/state', (_req, res) => {
-    res.json(service.state());
-  });
-  api.put('/loan', (req, res) => {
-    res.json(service.saveSetup(req.body));
-  });
-  api.put('/settings', (req, res) => {
-    res.json(service.saveSettings(req.body));
-  });
   api.get('/categories', async (_req, res) => {
     res.json(await service.categories());
   });
-  api.get('/months/:payment/candidates', async (req, res) => {
-    res.json(await service.candidates(paymentParam(req), req.query.categoryId, req.query.wide === '1'));
+
+  // --- loans ------------------------------------------------------------------
+  api.get('/loans', (_req, res) => {
+    res.json(service.loans());
   });
-  api.post('/months/:payment/match', async (req, res) => {
-    res.json(await service.match(paymentParam(req), req.body));
+  api.post('/loans', (req, res) => {
+    res.status(201).json(service.createLoan(req.body));
   });
-  api.post('/months/:payment/resolve', (req, res) => {
-    res.json(service.resolve(paymentParam(req), req.body));
+  api.patch('/loans/:loanId', (req, res) => {
+    res.json(service.updateLoan(intParam(req, 'loanId'), req.body));
   });
-  api.post('/months/:payment/unmatch', (req, res) => {
-    res.json(service.unmatch(paymentParam(req)));
+  api.post('/loans/:loanId/archive', (req, res) => {
+    res.json(service.setArchived(intParam(req, 'loanId'), true));
   });
-  api.put('/months/:payment/offset', (req, res) => {
-    res.json(service.setOffset(paymentParam(req), req.body));
+  api.post('/loans/:loanId/unarchive', (req, res) => {
+    res.json(service.setArchived(intParam(req, 'loanId'), false));
   });
-  api.post('/months/:payment/skip', (req, res) => {
-    res.json(service.skip(paymentParam(req), req.body));
+  api.delete('/loans/:loanId', (req, res) => {
+    res.json(service.deleteLoan(intParam(req, 'loanId'), req.query.confirm, req.query.keepAsset === '1'));
   });
-  api.post('/months/:payment/unskip', (req, res) => {
-    res.json(service.unskip(paymentParam(req)));
+
+  // --- one loan -------------------------------------------------------------------
+  const loan = express.Router({ mergeParams: true });
+  const one = (req: Request) => service.loan(intParam(req, 'loanId'));
+
+  loan.get('/state', (req, res) => {
+    res.json(one(req).state());
   });
-  api.put('/months/:payment/catch-up', (req, res) => {
-    res.json(service.setCatchUpPlan(paymentParam(req), req.body));
+  loan.put('/setup', (req, res) => {
+    res.json(one(req).saveSetup(req.body));
   });
-  api.delete('/months/:payment/catch-up', (req, res) => {
-    res.json(service.clearCatchUpPlan(paymentParam(req)));
+  loan.put('/settings', (req, res) => {
+    res.json(one(req).saveSettings(req.body));
   });
-  api.post('/home-values', (req, res) => {
-    res.json(service.addHomeValue(req.body));
+  loan.get('/months/:payment/candidates', async (req, res) => {
+    res.json(await one(req).candidates(paymentParam(req), req.query.categoryId, req.query.wide === '1'));
   });
-  api.delete('/home-values/:id', (req, res) => {
-    res.json(service.deleteHomeValue(idParam(req)));
+  loan.post('/months/:payment/match', async (req, res) => {
+    res.json(await one(req).match(paymentParam(req), req.body));
   });
-  api.post('/escrow/entries', (req, res) => {
-    res.json(service.addEscrowEntry(req.body));
+  loan.post('/months/:payment/resolve', (req, res) => {
+    res.json(one(req).resolve(paymentParam(req), req.body));
   });
-  api.delete('/escrow/entries/:id', (req, res) => {
-    res.json(service.deleteEscrowEntry(idParam(req)));
+  loan.post('/months/:payment/unmatch', (req, res) => {
+    res.json(one(req).unmatch(paymentParam(req)));
   });
-  api.put('/details', (req, res) => {
-    res.json(service.saveDetails(req.body));
+  loan.put('/months/:payment/offset', (req, res) => {
+    res.json(one(req).setOffset(paymentParam(req), req.body));
+  });
+  loan.post('/months/:payment/skip', (req, res) => {
+    res.json(one(req).skip(paymentParam(req), req.body));
+  });
+  loan.post('/months/:payment/unskip', (req, res) => {
+    res.json(one(req).unskip(paymentParam(req)));
+  });
+  loan.put('/months/:payment/catch-up', (req, res) => {
+    res.json(one(req).setCatchUpPlan(paymentParam(req), req.body));
+  });
+  loan.delete('/months/:payment/catch-up', (req, res) => {
+    res.json(one(req).clearCatchUpPlan(paymentParam(req)));
+  });
+  loan.post('/escrow/entries', (req, res) => {
+    res.json(one(req).addEscrowEntry(req.body));
+  });
+  loan.delete('/escrow/entries/:id', (req, res) => {
+    res.json(one(req).deleteEscrowEntry(idParam(req)));
+  });
+  loan.put('/details', (req, res) => {
+    res.json(one(req).saveDetails(req.body));
+  });
+  api.use('/loans/:loanId', loan);
+
+  // --- assets and their values -------------------------------------------------------
+  api.get('/assets', (_req, res) => {
+    res.json(service.assets());
+  });
+  api.post('/assets', (req, res) => {
+    res.status(201).json(service.createAsset(req.body));
+  });
+  api.patch('/assets/:assetId', (req, res) => {
+    res.json(service.updateAsset(intParam(req, 'assetId'), req.body));
+  });
+  api.delete('/assets/:assetId', (req, res) => {
+    res.json(service.deleteAsset(intParam(req, 'assetId')));
+  });
+  api.post('/assets/:assetId/values', (req, res) => {
+    res.status(201).json(service.addAssetValue(intParam(req, 'assetId'), req.body));
+  });
+  api.delete('/assets/:assetId/values/:valueId', (req, res) => {
+    res.json(service.deleteAssetValue(intParam(req, 'assetId'), intParam(req, 'valueId')));
   });
 
   app.use(API_PREFIX, api);
@@ -164,22 +219,28 @@ export function createApp(deps: AppDeps) {
       res.status(400).json({ error: 'Request body is not valid JSON' });
       return;
     }
-    console.error('[mortgage] unexpected error', err);
-    res.status(500).json({ error: 'Something went wrong in the mortgage tracker. Check its logs.' });
+    console.error('[asset-tracker] unexpected error', err);
+    res.status(500).json({ error: 'Something went wrong in the tracker. Check its logs.' });
   });
 
   return app;
 }
 
 /**
- * The public summary shape, version 1. Flat and dashboard-friendly: money is
- * in dollars (numbers), dates are YYYY-MM-DD. Add fields freely; never rename
- * or remove one without bumping `version`.
+ * Version 2 of the public summary: one object per loan. Money is in dollars
+ * (numbers), dates are YYYY-MM-DD. Add fields freely; never rename or remove
+ * one without bumping the version. Loan details (servicer, account numbers,
+ * notes) are never part of it.
  */
-export function summaryForDisplay(s: LoanSummary) {
+export const SUMMARY_VERSION = 2;
+
+export function summaryForDisplay(loan: LoanRecord, s: LoanSummary) {
   const dollars = (c: number) => c / 100;
+  const orNull = (c: number | null) => (c === null ? null : dollars(c));
   return {
-    version: 1,
+    id: loan.id,
+    nickname: loan.nickname,
+    type: loan.type,
     asOf: s.asOf,
     paymentNumber: s.lastPaidPayment ?? 0,
     totalPayments: s.totalPayments,
@@ -189,22 +250,34 @@ export function summaryForDisplay(s: LoanSummary) {
     balance: dollars(s.balance),
     deferredBalance: dollars(s.deferredBalance),
     pastDue: dollars(s.pastDue),
+    owed: dollars(s.owed),
     scheduledBalance: dollars(s.scheduledBalance),
     percentPaid: s.percentPaid,
-    equity: dollars(s.equity),
-    equityPercent: s.equityPercent,
-    homeValue: s.homeValue ? { value: dollars(s.homeValue.value), asOf: s.homeValue.date } : null,
-    marketEquity: s.marketEquity === null ? null : dollars(s.marketEquity),
-    marketEquityPercent: s.marketEquityPercent,
+    asset: s.asset
+      ? {
+          name: s.asset.name,
+          kind: s.asset.kind,
+          value: dollars(s.asset.value),
+          valueAsOf: s.asset.valueDate,
+          valueSource: s.asset.valueSource,
+          valueEntered: s.asset.valueEntered,
+          projectedValue: orNull(s.asset.projectedValue),
+        }
+      : null,
+    equity: s.asset ? dollars(s.asset.equity) : null,
+    equityPercent: s.asset ? s.asset.equityPercent : null,
+    payoff: s.payoff ? { amount: dollars(s.payoff.amount), source: s.payoff.source, asOf: s.payoff.asOf } : null,
     payoffDate: s.payoffDate,
-    pmi: {
-      active: s.pmi.active,
-      monthly: dollars(s.pmi.monthly),
-      dropDate: s.pmi.dropDate,
-      paymentsUntilDrop: s.pmi.paymentsUntilDrop,
-      daysUntilDrop: s.pmi.daysUntilDrop,
-      requestRemovalDate: s.pmi.request80Date,
-      automaticRemovalDate: s.pmi.auto78Date,
-    },
+    pmi: s.pmi.hasPmi
+      ? {
+          active: s.pmi.active,
+          monthly: dollars(s.pmi.monthly),
+          dropDate: s.pmi.dropDate,
+          paymentsUntilDrop: s.pmi.paymentsUntilDrop,
+          daysUntilDrop: s.pmi.daysUntilDrop,
+          requestRemovalDate: s.pmi.request80Date,
+          automaticRemovalDate: s.pmi.auto78Date,
+        }
+      : null,
   };
 }

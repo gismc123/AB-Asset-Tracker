@@ -19,6 +19,11 @@ export function monthlyInterest(balance: Cents, annualRatePercent: number): Cent
   return roundCents((balance * annualRatePercent) / 1200);
 }
 
+/** Simple daily interest: balance x rate / 365 x days, rounded to the cent. */
+export function dailyInterest(balance: Cents, annualRatePercent: number, days: number): Cents {
+  return roundCents((balance * annualRatePercent * days) / 36_500);
+}
+
 /**
  * Standard fully-amortizing payment: P * r / (1 - (1 + r)^-n), rounded to
  * the nearest cent (lenders round, so the final payment absorbs the drift).

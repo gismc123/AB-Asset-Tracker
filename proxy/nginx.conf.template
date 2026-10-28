@@ -1,9 +1,9 @@
-# Generated at container start by 40-mortgage-setup.sh.
+# Generated at container start by 40-asset-tracker-setup.sh.
 #
 # Everything goes to stock Actual untouched, except:
-#   /mortgage-addon/*  and  /mortgage-api/*   -> the mortgage backend
+#   /asset-tracker-addon/*  and  /asset-tracker-api/*   -> the tracker backend
 #   Actual's HTML pages get one extra tag before </head>:
-#     <script src="/mortgage-addon/inject.js" defer></script>
+#     <script src="/asset-tracker-addon/inject.js" defer></script>
 # Actual's CSP allows scripts from 'self', and this is same-origin, so no
 # Actual setting has to change.
 
@@ -28,7 +28,7 @@ server {
   client_max_body_size 200m;
 
   set $actual_upstream  ${ACTUAL_UPSTREAM_URL};
-  set $mortgage_backend ${MORTGAGE_BACKEND_URL};
+  set $tracker_backend ${TRACKER_BACKEND_URL};
 
   proxy_http_version 1.1;
   proxy_set_header Host              $http_host;
@@ -36,12 +36,12 @@ server {
   proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
   proxy_set_header X-Forwarded-Proto https;
 
-  location ^~ /mortgage-addon/ {
-    proxy_pass $mortgage_backend;
+  location ^~ /asset-tracker-addon/ {
+    proxy_pass $tracker_backend;
   }
 
-  location ^~ /mortgage-api/ {
-    proxy_pass $mortgage_backend;
+  location ^~ /asset-tracker-api/ {
+    proxy_pass $tracker_backend;
     proxy_read_timeout 120s;
   }
 
@@ -57,7 +57,7 @@ server {
 
     # sub_filter can only edit uncompressed responses.
     proxy_set_header Accept-Encoding "";
-    sub_filter '</head>' '<script src="/mortgage-addon/inject.js" defer></script></head>';
+    sub_filter '</head>' '<script src="/asset-tracker-addon/inject.js" defer></script></head>';
     sub_filter_once on;
     sub_filter_last_modified on;
   }

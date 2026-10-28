@@ -1,5 +1,7 @@
 /**
- * Core types for the mortgage engine.
+ * Core types for the loan engine. It knows nothing about loan types: a
+ * mortgage, a car loan and a personal loan are the same amortizing loan with
+ * different optional modules (PMI, escrow) turned on.
  *
  * All money is stored as integer cents, the same unit Actual uses for
  * transaction amounts, so nothing ever drifts from floating point math.
@@ -40,12 +42,58 @@ export interface StartingPoint {
   balance: Cents;
 }
 
+/** Optional parts of a loan. Mortgages have both; car and personal loans usually neither. */
+export interface LoanModules {
+  /** Private mortgage insurance, with its federal removal rules. */
+  pmi: boolean;
+  /** Tax and insurance collected with each payment and paid from an escrow account. */
+  escrow: boolean;
+}
+
+/**
+ * How interest is worked out for each payment.
+ *
+ * - `monthly`: balance x rate / 12. How most mortgages are serviced.
+ * - `daily`: simple interest, balance x rate / 365 x the days since the
+ *   previous payment (from the loan open date for the first one). Once a
+ *   payment is matched to a bank transaction, its real date is used, so an
+ *   early or late payment changes the split between interest and principal.
+ *   How many car and personal loans work.
+ */
+export type InterestMethod = 'monthly' | 'daily';
+
+/** A cost paid once when the loan was opened, such as a processing fee or credit insurance. */
+export interface OneOffFee {
+  label: string;
+  amount: Cents;
+  /** True when the fee was added to the amount borrowed instead of paid up front. Informational. */
+  financed: boolean;
+}
+
+/**
+ * A fee charged once a year with the first payment of each loan year
+ * (payments 1, 13, 25 and so on), as a percent of the original amount or of
+ * the balance at that payment. It is part of the payment total.
+ */
+export interface YearlyFee {
+  basis: 'original' | 'balance';
+  percent: number;
+}
+
+/** A payoff amount quoted by the lender, used instead of the estimate until it expires. */
+export interface PayoffQuote {
+  amount: Cents;
+  goodThrough: ISODate;
+}
+
 export interface LoanSetup {
   /** Original loan amount (principal borrowed). */
   originalAmount: Cents;
   /** Annual interest rate as a percent, e.g. 6.5 for 6.5%. */
   annualRatePercent: number;
   termYears: number;
+  /** Term in months, for terms that aren't whole years. When set, it wins over `termYears`. */
+  termMonths?: number | null;
   /** Closing / note date. Informational, and must not be after the first payment. */
   openDate: ISODate;
   firstPaymentDate: ISODate;
@@ -57,7 +105,10 @@ export interface LoanSetup {
    */
   piPaymentOverride: Cents | null;
 
-  /** Original home value for PMI: usually the lower of purchase price and appraisal. */
+  /**
+   * Original property value for the PMI rules: usually the lower of purchase
+   * price and appraisal. Only used when the PMI module is on.
+   */
   originalHomeValue: Cents;
   pmiMonthly: Cents;
   /** Payments due on or after this date carry PMI. Null = from the first payment. */
@@ -69,6 +120,16 @@ export interface LoanSetup {
   extraPrincipal: Cents;
   /** Set for a loan that was already under way. Missing or null = tracked from payment 1. */
   startingPoint?: StartingPoint | null;
+
+  /** Missing = both on, as every loan saved before modules existed was a mortgage. */
+  modules?: LoanModules;
+  /** Missing = monthly. */
+  interestMethod?: InterestMethod;
+  /** Paid up front toward the purchase. Informational; equity uses the asset's value. */
+  downPayment?: Cents | null;
+  fees?: OneOffFee[];
+  yearlyFee?: YearlyFee | null;
+  payoffQuote?: PayoffQuote | null;
 }
 
 /**
@@ -144,7 +205,9 @@ export interface ScheduleRow {
   principalAndInterest: Cents;
   pmi: Cents;
   escrow: Cents;
-  /** Everything that leaves your account: P&I + extra + offset + PMI + escrow. */
+  /** Yearly fee charged with this payment (see `YearlyFee`). */
+  fee: Cents;
+  /** Everything that leaves your account: P&I + extra + offset + PMI + escrow + fee. */
   total: Cents;
   endingBalance: Cents;
   /** True when the row came from locked, reconciled actual amounts. */
@@ -210,6 +273,8 @@ export interface Schedule {
     principal: Cents;
     pmi: Cents;
     escrow: Cents;
+    /** Yearly fees on the schedule. One-off fees are in the setup. */
+    fees: Cents;
     payments: number;
     capitalizedInterest: Cents;
     deferred: Cents;

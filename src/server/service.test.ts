@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Store } from './db.js';
-import { HttpError, MortgageService } from './service.js';
-import { FakeSource, MORTGAGE_CATEGORY, SAMPLE_SETUP } from './testing.js';
+import { HttpError, LoanService, TrackerService } from './service.js';
+import { AUTO_SETUP, CAR_CATEGORY, FakeSource, MORTGAGE_CATEGORY, SAMPLE_SETUP } from './testing.js';
 
 let store: Store;
 let source: FakeSource;
-let service: MortgageService;
+let tracker: TrackerService;
+let service: LoanService;
 
 beforeEach(() => {
   store = new Store(':memory:');
   source = new FakeSource();
-  service = new MortgageService(store, source, () => '2025-06-15');
+  tracker = new TrackerService(store, source, () => '2025-06-15');
+  const { loan } = tracker.createLoan({ nickname: 'Mortgage', type: 'mortgage' });
+  service = tracker.loan(loan.id);
   service.saveSetup(SAMPLE_SETUP);
   service.saveSettings({ categoryId: MORTGAGE_CATEGORY });
 });
@@ -29,8 +32,8 @@ async function expectHttp(p: Promise<unknown> | (() => unknown), status: number)
 
 describe('setup', () => {
   it('reports no schedule until the loan is set up', () => {
-    const empty = new MortgageService(new Store(':memory:'), source, () => '2025-06-15');
-    const s = empty.state();
+    const t = new TrackerService(new Store(':memory:'), source, () => '2025-06-15');
+    const s = t.loan(t.createLoan({ nickname: 'Car', type: 'auto' }).loan.id).state();
     expect(s.setup).toBeNull();
     expect(s.schedule).toBeNull();
   });
@@ -147,7 +150,7 @@ describe('reconciliation flow', () => {
     await service.match(1, { transactionId: 't1' });
     await expectHttp(() => service.resolve(1, { resolution: 'rounding' }), 400);
     expect(row(1).status).toBe('flagged');
-    expect(store.listAdjustments()).toHaveLength(0);
+    expect(store.loan(1).listAdjustments()).toHaveLength(0);
   });
 
   it('undo removes the match and the adjustments it created', async () => {
@@ -157,7 +160,7 @@ describe('reconciliation flow', () => {
     service.unmatch(1);
     expect(row(1).status).toBe('scheduled');
     expect(row(2).escrow).toBe(41_250);
-    expect(store.listAdjustments()).toHaveLength(0);
+    expect(store.loan(1).listAdjustments()).toHaveLength(0);
   });
 
   it('will not reuse one transaction for two months', async () => {
@@ -209,7 +212,7 @@ describe('skipped payments', () => {
     service.skip(2, { mode: 'capitalize' });
     const s = service.skip(2, { mode: 'defer' });
     expect(s.schedule!.rows[1]!.skipped).toBe('defer');
-    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'skip')).toHaveLength(1);
+    expect(store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'skip')).toHaveLength(1);
   });
 
   it('refuses bad modes, matched months, and matching a skipped month', async () => {
@@ -225,7 +228,7 @@ describe('skipped payments', () => {
 
   it('survives a reopen (the skip mode is stored)', () => {
     service.skip(3, { mode: 'defer' });
-    expect(store.listAdjustments().at(-1)!.adjustment).toEqual({ kind: 'skip', payment: 3, mode: 'defer' });
+    expect(store.loan(1).listAdjustments().at(-1)!.adjustment).toEqual({ kind: 'skip', payment: 3, mode: 'defer' });
   });
 });
 
@@ -233,18 +236,25 @@ describe('equity, periods and escrow in state', () => {
   it('reports equity from the original value until an estimate is added', () => {
     let s = service.state();
     expect(s.analysis!.equity).toMatchObject({ isEstimate: false, homeValue: SAMPLE_SETUP.originalHomeValue });
-    s = service.addHomeValue({ date: '2025-06-01', value: 37_000_000, source: 'Online estimate' });
+    // Saving a mortgage's setup records its home.
+    const asset = s.asset!;
+    expect(asset).toMatchObject({ kind: 'home', originalValue: SAMPLE_SETUP.originalHomeValue, loanId: service.loan.id });
+    const updated = tracker.addAssetValue(asset.id, { date: '2025-06-01', value: 37_000_000, source: 'Online estimate' });
+    s = service.state();
     expect(s.analysis!.equity).toMatchObject({ isEstimate: true, homeValue: 37_000_000, homeValueSource: 'Online estimate' });
     expect(s.summary!.marketEquity).toBe(37_000_000 - s.summary!.balance);
-    const id = s.homeValues[0]!.id;
-    expect(service.deleteHomeValue(id).homeValues).toHaveLength(0);
+    expect(s.summary!.asset).toMatchObject({ value: 37_000_000, valueEntered: true, equity: 37_000_000 - s.summary!.owed });
+    tracker.deleteAssetValue(asset.id, updated.values[0]!.id);
+    expect(service.state().asset!.values).toHaveLength(0);
   });
 
-  it('validates home values', async () => {
-    await expectHttp(() => service.addHomeValue({ date: 'June', value: 1 }), 400);
-    await expectHttp(() => service.addHomeValue({ date: '2025-06-01', value: -5 }), 400);
-    await expectHttp(() => service.addHomeValue({ date: '2025-06-01', value: 12.5 }), 400);
-    await expectHttp(() => service.deleteHomeValue(12345), 404);
+  it('validates asset values', async () => {
+    const id = service.state().asset!.id;
+    await expectHttp(() => tracker.addAssetValue(id, { date: 'June', value: 1 }), 400);
+    await expectHttp(() => tracker.addAssetValue(id, { date: '2025-06-01', value: -5 }), 400);
+    await expectHttp(() => tracker.addAssetValue(id, { date: '2025-06-01', value: 12.5 }), 400);
+    await expectHttp(() => tracker.deleteAssetValue(id, 12345), 404);
+    await expectHttp(() => tracker.addAssetValue(999, { date: '2025-06-01', value: 1 }), 404);
   });
 
   it('puts paid escrow and recorded bills into the escrow ledger', async () => {
@@ -300,12 +310,12 @@ describe('catch-up plans', () => {
 
     // Changing the plan replaces it.
     service.setCatchUpPlan(2, { fromPayment: 6, months: 3 });
-    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
+    expect(store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
 
     service.unskip(2);
-    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
+    expect(store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(1);
     service.unskip(3);
-    expect(store.listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(0);
+    expect(store.loan(1).listAdjustments().filter((a) => a.adjustment.kind === 'catchUpPlan')).toHaveLength(0);
   });
 
   it('validates the plan', async () => {
@@ -379,5 +389,67 @@ describe('a loan already under way', () => {
     await expectHttp(() => service.saveSetup({ ...SAMPLE_SETUP, startingPoint: 'soon' }), 400);
     await expectHttp(() => service.saveSetup({ ...SAMPLE_SETUP, startingPoint: { payment: 2 } }), 400);
     await expectHttp(() => service.saveSetup(underway(0)), 400);
+  });
+});
+
+describe('other loan types', () => {
+  function carLoan(setup = AUTO_SETUP) {
+    const { loan } = tracker.createLoan({ nickname: 'Car', type: 'auto', setup, categoryId: CAR_CATEGORY });
+    return tracker.loan(loan.id);
+  }
+
+  it('creates a car loan without a home and offers no escrow or PMI answers', async () => {
+    const car = carLoan();
+    const s = car.state();
+    expect(s.asset).toBeNull();
+    expect(s.analysis!.equity).toBeNull();
+    expect(s.summary!.asset).toBeNull();
+    expect(s.settings.categoryId).toBe(CAR_CATEGORY);
+    source.add('c1', '2025-04-10', -(s.schedule!.rows[0]!.total + 5_000), CAR_CATEGORY);
+    const m = await car.match(1, { transactionId: 'c1' });
+    expect(m.suggestions).toEqual(['extraPrincipal']);
+    await expectHttp(() => car.resolve(1, { resolution: 'escrow' }), 400);
+    await expectHttp(() => car.addEscrowEntry({ date: '2025-05-01', kind: 'propertyTax', amount: 1 }), 409);
+  });
+
+  it('works out daily interest to the day the bank paid', async () => {
+    const car = carLoan({ ...AUTO_SETUP, interestMethod: 'daily', annualRatePercent: 7.3, originalAmount: 2_500_000 });
+    const due = car.state().schedule!.rows[0]!;
+    // Paid five days early: same total, less interest, more principal.
+    source.add('c1', '2025-04-05', -due.total, CAR_CATEGORY);
+    expect(await car.match(1, { transactionId: 'c1' })).toMatchObject({ status: 'paid' });
+    const paid = car.state().schedule!.rows[0]!;
+    expect(paid.locked).toBe(true);
+    expect(paid.interest).toBe(due.interest - 2_500_000 * 0.0002 * 5);
+    expect(paid.principal).toBe(due.principal + 2_500_000 * 0.0002 * 5);
+    // The next month runs from April 5.
+    const next = car.state().schedule!.rows[1]!;
+    expect(next.interest).toBe(Math.round(paid.endingBalance * 0.0002 * 35));
+  });
+
+  it('keeps PMI and escrow answers for a mortgage', async () => {
+    source.add('m1', '2025-04-01', -(row(1).total + 5_000));
+    expect((await service.match(1, { transactionId: 'm1' })).suggestions).toEqual(['extraPrincipal', 'escrow', 'pmi']);
+  });
+
+  it('saves the new optional setup fields', () => {
+    const car = carLoan();
+    const s = car.saveSetup({
+      ...AUTO_SETUP,
+      downPayment: 600_000,
+      fees: [{ label: 'Processing', amount: 29_900, financed: false }],
+      yearlyFee: { basis: 'balance', percent: 0.25 },
+      payoffQuote: { amount: 2_500_000, goodThrough: '2025-06-30' },
+    });
+    expect(s.setup).toMatchObject({ downPayment: 600_000, yearlyFee: { basis: 'balance', percent: 0.25 } });
+    expect(s.schedule!.rows[0]!.fee).toBe(Math.round(3_000_000 * 0.0025));
+    expect(s.summary!.payoff).toMatchObject({ source: 'quote', amount: 2_500_000 });
+    expect(s.summary!.oneOffFees).toBe(29_900);
+  });
+
+  it('turns a term in months into whole years for older readers', () => {
+    const s = carLoan({ ...AUTO_SETUP, termMonths: 18, termYears: 0 }).state();
+    expect(s.setup).toMatchObject({ termMonths: 18, termYears: 2 });
+    expect(s.schedule!.rows).toHaveLength(18);
   });
 });

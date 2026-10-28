@@ -1,53 +1,87 @@
 import { useEffect, useState } from 'react';
 import type { LoanDetailField } from '../../server/db.js';
-import type { LoanDetails, MortgageClient, StateView } from '../api.js';
+import { modulesOf } from '../../engine/index.js';
+import type { LoanDetails, LoanClient, LoanType, StateView } from '../api.js';
 
 interface Props {
   state: StateView;
-  client: MortgageClient;
+  client: LoanClient;
   onState(state: StateView): void;
 }
 
 type FieldSpec = { key: LoanDetailField; label: string; placeholder?: string; secret?: boolean; wide?: boolean; options?: string[] };
 
-const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
-  {
-    title: 'Servicer',
-    fields: [
-      { key: 'servicerName', label: 'Servicer', placeholder: 'Who you send payments to' },
-      { key: 'loanNumber', label: 'Loan / account number', secret: true },
-      { key: 'servicerPhone', label: 'Phone' },
-      { key: 'servicerWebsite', label: 'Website' },
-      { key: 'servicerAddress', label: 'Payment mailing address', wide: true },
-    ],
-  },
-  {
-    title: 'Loan',
-    fields: [
-      { key: 'lenderName', label: 'Original lender', placeholder: 'If different from the servicer' },
-      { key: 'loanType', label: 'Loan type', options: ['Conventional', 'FHA', 'VA', 'USDA', 'Jumbo', 'Other'] },
-      { key: 'mersMin', label: 'MERS MIN', placeholder: '18-digit number on your note', secret: true },
-      { key: 'propertyAddress', label: 'Property address', wide: true },
-    ],
-  },
-  {
-    title: 'Insurance & taxes',
-    fields: [
-      { key: 'insuranceCarrier', label: 'Homeowners insurance' },
-      { key: 'insurancePolicyNumber', label: 'Policy number', secret: true },
-      { key: 'insuranceAgent', label: 'Agent / contact' },
-      { key: 'taxParcelNumber', label: 'Tax parcel number' },
-      { key: 'taxAuthority', label: 'Tax authority', placeholder: 'e.g. County Treasurer' },
-    ],
-  },
-  {
-    title: 'PMI',
-    fields: [
-      { key: 'pmiCompany', label: 'Mortgage insurance company' },
-      { key: 'pmiCertificateNumber', label: 'Certificate number', secret: true },
-    ],
-  },
+const SERVICER: FieldSpec[] = [
+  { key: 'servicerName', label: 'Servicer / lender', placeholder: 'Who you send payments to' },
+  { key: 'loanNumber', label: 'Loan / account number', secret: true },
+  { key: 'servicerPhone', label: 'Phone' },
+  { key: 'servicerWebsite', label: 'Website' },
+  { key: 'servicerAddress', label: 'Payment mailing address', wide: true },
 ];
+
+/** Only the sections that make sense for this kind of loan. */
+function sectionsFor(type: LoanType, pmi: boolean): { title: string; fields: FieldSpec[] }[] {
+  if (type === 'auto') {
+    return [
+      { title: 'Lender', fields: SERVICER },
+      {
+        title: 'Vehicle',
+        fields: [
+          { key: 'vin', label: 'VIN', secret: true },
+          { key: 'licensePlate', label: 'License plate' },
+          { key: 'lenderName', label: 'Original lender', placeholder: 'If different from the servicer' },
+        ],
+      },
+      {
+        title: 'Insurance',
+        fields: [
+          { key: 'insuranceCarrier', label: 'Auto insurance' },
+          { key: 'insurancePolicyNumber', label: 'Policy number', secret: true },
+          { key: 'insuranceAgent', label: 'Agent / contact' },
+        ],
+      },
+    ];
+  }
+  if (type === 'personal') {
+    return [
+      { title: 'Lender', fields: SERVICER },
+      { title: 'Loan', fields: [{ key: 'lenderName', label: 'Original lender', placeholder: 'If different from the servicer' }] },
+    ];
+  }
+  return [
+    { title: 'Servicer', fields: SERVICER },
+    {
+      title: 'Loan',
+      fields: [
+        { key: 'lenderName', label: 'Original lender', placeholder: 'If different from the servicer' },
+        { key: 'loanType', label: 'Loan type', options: ['Conventional', 'FHA', 'VA', 'USDA', 'Jumbo', 'Other'] },
+        { key: 'mersMin', label: 'MERS MIN', placeholder: '18-digit number on your note', secret: true },
+        { key: 'propertyAddress', label: 'Property address', wide: true },
+      ],
+    },
+    {
+      title: 'Insurance & taxes',
+      fields: [
+        { key: 'insuranceCarrier', label: 'Homeowners insurance' },
+        { key: 'insurancePolicyNumber', label: 'Policy number', secret: true },
+        { key: 'insuranceAgent', label: 'Agent / contact' },
+        { key: 'taxParcelNumber', label: 'Tax parcel number' },
+        { key: 'taxAuthority', label: 'Tax authority', placeholder: 'e.g. County Treasurer' },
+      ],
+    },
+    ...(pmi
+      ? [
+          {
+            title: 'PMI',
+            fields: [
+              { key: 'pmiCompany', label: 'Mortgage insurance company' },
+              { key: 'pmiCertificateNumber', label: 'Certificate number', secret: true },
+            ] as FieldSpec[],
+          },
+        ]
+      : []),
+  ];
+}
 
 /** Reference details about the loan: servicer, account numbers, insurance, notes. */
 export function DetailsView({ state, client, onState }: Props) {
@@ -88,7 +122,7 @@ export function DetailsView({ state, client, onState }: Props) {
         Numbers marked ••• stay masked until you click into them.
       </div>
 
-      {SECTIONS.map((section) => (
+      {sectionsFor(state.loan.type, state.setup ? modulesOf(state.setup).pmi : state.loan.type === 'mortgage').map((section) => (
         <div key={section.title}>
           <div className="mt-card">
             <h3>{section.title}</h3>
@@ -130,7 +164,7 @@ export function DetailsView({ state, client, onState }: Props) {
         <h3>Notes & other details</h3>
         <div className="mt-field">
           <label htmlFor="mt-det-notes">Notes</label>
-          <textarea id="mt-det-notes" className="mt-input" value={d.fields.notes ?? ''} onChange={(ev) => setField('notes', ev.target.value)} placeholder="Escrow analysis month, prepayment terms, who to call…" />
+          <textarea id="mt-det-notes" className="mt-input" value={d.fields.notes ?? ''} onChange={(ev) => setField('notes', ev.target.value)} placeholder="Prepayment terms, who to call, anything worth remembering…" />
         </div>
         <div className="mt-gap" />
         <div style={{ display: 'grid', gap: 8 }}>

@@ -1,0 +1,33 @@
+{
+  "_comment": "Made-up sample car loan, as sent to POST /asset-tracker-api/loans. Not anyone's real numbers. Money is in cents.",
+  "nickname": "Hatchback",
+  "type": "auto",
+  "setup": {
+    "originalAmount": 3000000,
+    "annualRatePercent": 6.9,
+    "termYears": 5,
+    "termMonths": 60,
+    "openDate": "2025-03-10",
+    "firstPaymentDate": "2025-04-10",
+    "paymentDay": 10,
+    "piPaymentOverride": null,
+    "originalHomeValue": 0,
+    "pmiMonthly": 0,
+    "pmiStartDate": null,
+    "pmiRemovalRule": "auto78Scheduled",
+    "escrowMonthly": 0,
+    "extraPrincipal": 0,
+    "modules": { "pmi": false, "escrow": false },
+    "interestMethod": "daily",
+    "downPayment": 600000,
+    "fees": [{ "label": "Processing fee", "amount": 29900, "financed": false }]
+  },
+  "asset": {
+    "name": "Sample hatchback",
+    "kind": "vehicle",
+    "originalValue": 3600000,
+    "valueTrend": "depreciating",
+    "trendRatePercent": 15,
+    "acquiredDate": "2025-03-10"
+  }
+}

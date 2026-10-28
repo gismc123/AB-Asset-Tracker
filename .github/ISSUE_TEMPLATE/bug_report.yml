@@ -1,0 +1,78 @@
+name: Bug report
+description: Something doesn't work or shows the wrong numbers.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please remove anything personal first: real loan amounts,
+        account numbers, names, addresses, sync IDs, passwords and tokens.
+  - type: input
+    id: actual-version
+    attributes:
+      label: Actual version
+      description: Shown at the bottom of Actual's login screen, or in Settings.
+      placeholder: e.g. 26.10.0
+    validations:
+      required: true
+  - type: input
+    id: tracker-version
+    attributes:
+      label: AB Asset Tracker version or commit
+      placeholder: e.g. v0.1.0, or the output of `git rev-parse --short HEAD`
+  - type: dropdown
+    id: setup
+    attributes:
+      label: Setup type
+      options:
+        - "A: in front of an Actual I already run (compose.existing-actual.yml)"
+        - "B: bundled, Actual and the add-on together (docker-compose.yml)"
+        - Other (please describe below)
+    validations:
+      required: true
+  - type: dropdown
+    id: loan-type
+    attributes:
+      label: Loan type involved
+      options:
+        - Mortgage
+        - Auto loan
+        - Personal loan
+        - Not specific to a loan
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, step by step, starting from opening Loans in the sidebar.
+      placeholder: |
+        1. Open Loans, pick the car loan
+        2. Go to Reconcile, payment #7
+        3. Click the matching transaction
+        4. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console line
+      description: Open the browser console (F12, then Console) and paste any line that starts with `[asset-tracker]`. Write "none" if there isn't one.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Backend log (optional)
+      description: Relevant lines from `docker compose logs asset-tracker-backend`. Remove anything personal.
+      render: text
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: e.g. Firefox 140 on Windows 11

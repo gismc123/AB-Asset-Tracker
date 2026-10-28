@@ -1,5 +1,5 @@
 /**
- * Styles for the mortgage screens. They live inside a shadow root, so they
+ * Styles for the loan screens. They live inside a shadow root, so they
  * cannot leak into Actual and Actual's styles cannot leak in. Colors come
  * from Actual's own theme variables (which do cross the shadow boundary),
  * with fallbacks, so the tab follows Actual's light/dark theme.
@@ -53,7 +53,7 @@ export const styles = /* css */ `
 .mt *, .mt *::before, .mt *::after { box-sizing: border-box; }
 .mt-page { max-width: 1120px; margin: 0 auto; padding: 24px 28px 64px; }
 
-/* header + tabs */
+/* header, loan picker and tabs */
 .mt-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 .mt-title { font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .mt-sub { color: var(--muted); margin-top: 2px; }
@@ -61,6 +61,27 @@ export const styles = /* css */ `
 .mt-tab { border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 600; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
 .mt-tab:hover { color: var(--text); }
 .mt-tab[aria-selected='true'] { background: var(--card); color: var(--text); box-shadow: var(--shadow); }
+.mt-screen-tabs { display: inline-flex; flex-wrap: wrap; margin-bottom: 18px; }
+.mt-picker { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.mt-loan-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; font: inherit; font-weight: 600; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.mt-loan-tab span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-loan-tab:hover { color: var(--text); background: var(--hover); }
+.mt-loan-tab[aria-selected='true'] { color: var(--text); background: var(--card); border-color: var(--primary); box-shadow: var(--shadow); }
+.mt-loan-tab.add { border-style: dashed; }
+.mt-type-icon { display: inline-flex; flex: none; }
+.mt-type-icon svg { display: block; }
+.mt-pill .mt-type-icon svg { width: 12px; height: 12px; }
+
+/* add-loan wizard and first run */
+.mt-welcome h2 { margin: 0 0 8px; font-size: 18px; }
+.mt-welcome ol { margin: 8px 0; padding-left: 20px; }
+.mt-step { margin: 0 0 10px; font-size: 14px; font-weight: 700; }
+.mt-type-card { display: grid; gap: 6px; text-align: left; font: inherit; color: inherit; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; cursor: pointer; box-shadow: var(--shadow); }
+.mt-type-card:hover { border-color: var(--primary); }
+.mt-type-card .mt-type-icon { color: var(--primary); }
+.mt-type-card .mt-type-icon svg { width: 22px; height: 22px; }
+.mt-type-card b { font-size: 15px; }
+.mt-type-card small { color: var(--muted); }
 
 /* cards and layout */
 .mt-grid { display: grid; gap: 14px; }
@@ -123,6 +144,8 @@ export const styles = /* css */ `
 .mt-btn.primary { background: var(--primary); color: var(--primary-text); border-color: transparent; }
 .mt-btn.small { padding: 4px 10px; font-size: 12px; }
 .mt-btn.link { border: 0; background: none; color: var(--link); padding: 4px 6px; }
+.mt-btn.danger { background: var(--bad); color: #fff; border-color: transparent; }
+.mt-kpi-value.neg { color: var(--bad); }
 .mt-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .mt-spacer { flex: 1; }
 .mt-input, .mt-select { font: inherit; color: var(--input-text); background: var(--input); border: 1px solid var(--input-border); border-radius: 6px; padding: 7px 10px; width: 100%; }
@@ -218,6 +241,7 @@ textarea.mt-input { min-height: 90px; resize: vertical; font: inherit; }
 .mt-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; }
 .mt-kv dt { color: var(--muted); }
 .mt-kv dd { margin: 0; text-align: right; font-weight: 600; }
+.mt-kv dt, .mt-kv dd { padding: 2px 0; }
 .mt-empty { text-align: center; color: var(--muted); padding: 28px 12px; }
 .mt-diff { font-size: 22px; font-weight: 700; }
 /*
