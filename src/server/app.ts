@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { SourceUnavailable } from './actual.js';
+import { backupFileName } from './backup.js';
 import type { LoanSummary } from '../engine/index.js';
 import type { LoanRecord } from './db.js';
 import type { TokenValidator } from './auth.js';
@@ -42,7 +43,10 @@ export function createApp(deps: AppDeps) {
   const { service } = deps;
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '100kb' }));
+  // A restore carries the whole tracker, so it gets a bigger limit of its
+  // own, applied only after the login check.
+  const smallJson = express.json({ limit: '100kb' });
+  app.use((req, res, next) => (req.path === `${API_PREFIX}/restore` ? next() : smallJson(req, res, next)));
 
   // --- static add-on files (no data in them, so no auth) -----------------
   app.get(`${ADDON_PREFIX}/inject.js`, (_req, res) => {
@@ -200,6 +204,17 @@ export function createApp(deps: AppDeps) {
     res.json(service.deleteAssetValue(intParam(req, 'assetId'), intParam(req, 'valueId')));
   });
 
+  // --- backup and restore --------------------------------------------------------------
+  api.get('/backup', (_req, res) => {
+    const backup = service.backup();
+    res.set('Cache-Control', 'no-store');
+    res.attachment(backupFileName(backup));
+    res.json(backup);
+  });
+  api.post('/restore', express.json({ limit: '50mb' }), (req, res) => {
+    res.json(service.restore(req.body, req.query.confirm));
+  });
+
   app.use(API_PREFIX, api);
 
   app.use((_req, res) => {
@@ -213,6 +228,10 @@ export function createApp(deps: AppDeps) {
     }
     if (err instanceof SourceUnavailable) {
       res.status(503).json({ error: err.message });
+      return;
+    }
+    if (err instanceof Error && 'type' in err && err.type === 'entity.too.large') {
+      res.status(413).json({ error: 'That request is too large' });
       return;
     }
     if (err instanceof SyntaxError && 'body' in err) {

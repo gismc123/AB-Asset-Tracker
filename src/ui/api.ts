@@ -1,10 +1,11 @@
 import type { Cents, EscrowKind, ISODate, LoanSetup, SkipMode } from '../engine/index.js';
 import type { CategoryGroup } from '../server/actual.js';
+import type { Backup, RestoreResult } from '../server/backup.js';
 import type { AssetInput, AssetRecord, LoanDetails, LoanRecord, LoanType } from '../server/db.js';
 import type { Candidate, LoanListItem, MatchResult, StateView } from '../server/service.js';
 import type { Resolution } from '../engine/index.js';
 
-export type { StateView, Candidate, MatchResult, CategoryGroup, LoanDetails, LoanListItem, LoanRecord, LoanType, AssetRecord };
+export type { StateView, Candidate, MatchResult, CategoryGroup, LoanDetails, LoanListItem, LoanRecord, LoanType, AssetRecord, Backup, RestoreResult };
 
 export class ApiError extends Error {
   constructor(
@@ -101,6 +102,10 @@ export interface TrackerClient {
   updateLoan(loanId: number, patch: { nickname?: string; archived?: boolean }): Promise<LoanRecord>;
   deleteLoan(loanId: number, nickname: string): Promise<void>;
   loan(loanId: number): LoanClient;
+  /** Everything in the tracker, as a backup file's contents. */
+  backup(): Promise<Backup>;
+  /** Replace everything in the tracker with a backup. */
+  restore(backup: unknown): Promise<RestoreResult>;
 }
 
 export function createClient(base = '/asset-tracker-api', getToken: () => Promise<string | null> = readActualToken): TrackerClient {
@@ -169,5 +174,7 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       await call('DELETE', `/loans/${id}?confirm=${q(nickname)}`);
     },
     loan,
+    backup: () => call('GET', '/backup'),
+    restore: (backup) => call('POST', '/restore?confirm=replace', backup),
   };
 }

@@ -34,6 +34,16 @@ decided by the maintainer; the rest are defaults that can be revisited.
 - **A bank transaction can be matched once per loan (unique on `loan_id, transaction_id`).** Each loan has its own category, so overlap is unlikely, and a global rule would block a legitimate split payment.
 - **At most one asset per loan; assets also store `trend_rate_percent` and `acquired_date`.** One asset keeps equity unambiguous; the two extra columns drive the projected value curve.
 
+## Backup and restore
+
+- **One JSON file with every row of every tracker table, ids and timestamps included.** Restoring gives back exactly what was there, and loan ids stay the same, so a dashboard using `?loan=<id>` keeps working on a new install.
+- **The file records its schema version; a restore loads it into a scratch database at that version, then runs the normal migrations.** A backup made today still restores after a later update changes the layout, with no separate converter to maintain.
+- **Restore replaces everything rather than merging.** Merging would have to settle clashing ids and duplicate matches; replacing is predictable and matches what "restore" means.
+- **The whole backup is checked (columns, constraints, references, JSON columns) before the live database is touched, and a `VACUUM INTO` copy named `<file>.backup-before-restore-<UTC time>` is written first.** A bad file changes nothing, and a good one can still be undone.
+- **The restore request needs `confirm=replace` and a logged-in session, and only it accepts a body up to 50 MB, parsed after the login check.** Every other request keeps the 100 KB limit.
+- **A command-line `backup-cli.js` in the backend image.** Scheduled backups can't log in to Actual, so `docker compose exec` is the way in for cron.
+- **Actual's budget and `.env` are left out.** Actual has its own export, and `.env` holds passwords that shouldn't travel in a file people email to themselves.
+
 ## Engine
 
 - **Missing `modules` means PMI and escrow are on.** Every loan saved before modules existed is a mortgage.

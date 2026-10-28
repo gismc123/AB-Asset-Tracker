@@ -27,6 +27,10 @@ front of Actual and only ever reads from your budget.
   uses the real date each payment cleared), a down payment, one-off fees, a
   yearly fee on the original amount or the balance, and a payoff amount
   from your lender's quote or an estimate.
+- **Backup and restore.** Download everything in the tracker as one JSON
+  file and load it back, on the same install or a new one. A copy of the
+  current data is saved before a restore replaces it. Also available from
+  the command line for scheduled backups.
 - **Read-only summary endpoint** for dashboards, with every loan or one at
   a time, behind its own token sent as a Bearer header.
 - **Preview page** with made-up sample loans, for trying the screens without
