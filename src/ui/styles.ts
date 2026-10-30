@@ -221,6 +221,16 @@ textarea.mt-input { min-height: 90px; resize: vertical; font: inherit; }
 .mt-table tr.current td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
 .mt-table tr.year td { background: var(--header); font-weight: 700; cursor: default; color: var(--muted); font-size: 12px; }
 .mt-table td.muted { color: var(--muted); }
+.mt-table tr.mt-subrow td { padding-top: 0; text-align: left; background: var(--card); cursor: default; border-bottom: 1px solid var(--border); }
+.mt-table tr.mt-subrow:hover td { background: var(--card); }
+.mt-table tr.has-sub td { border-bottom: 0; }
+.mt-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mt-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 2px 1px 8px; border-radius: 999px; background: var(--header); color: var(--text); border: 1px solid var(--border); }
+.mt-chip .mt-x { padding: 0 6px; }
+.mt-plus { border: 1px dashed var(--border); background: none; color: var(--muted); cursor: pointer; font: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 4px; margin-left: 6px; opacity: 0; }
+.mt-table tr:hover .mt-plus, .mt-plus:focus { opacity: 1; }
+.mt-plus:hover { color: var(--primary); border-color: var(--primary); }
+.mt-badge { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 999px; background: var(--good-bg); color: var(--good); margin-left: 6px; vertical-align: 1px; }
 
 /* reconcile */
 .mt-month-nav { display: flex; align-items: center; gap: 10px; }

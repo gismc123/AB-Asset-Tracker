@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AssetKind, PeriodBasis, PeriodBreakouts, PeriodTotals, ValueTrend } from '../../engine/index.js';
+import { ACCOUNT_VALUE_SOURCE, type AssetKind, type PeriodBasis, type PeriodBreakouts, type PeriodTotals, type ValueTrend } from '../../engine/index.js';
 import type { AssetRecord, BudgetAccount, LoanClient, StateView } from '../api.js';
 import { centsToInput, date, parseDollars, percent } from '../format.js';
 import { ASSET_KIND_LABEL, LOAN_TYPE_INFO, VALUE_SOURCES } from '../loanTypes.js';
@@ -184,7 +184,9 @@ function EquityParts({ state, kind }: { state: StateView; kind: AssetKind }) {
     { label: 'Extra before tracking', note: 'Starting balance vs. the original schedule', value: e.parts.extraBeforeTracking },
     {
       label: 'Value change',
-      note: e.isEstimate ? `Since purchase, per ${e.homeValueSource.toLowerCase()}` : 'Add a newer value to include it',
+      note: e.isEstimate
+        ? `Since purchase, per ${e.homeValueSource === ACCOUNT_VALUE_SOURCE ? 'your Actual account' : e.homeValueSource.toLowerCase()}`
+        : 'Add a newer value to include it',
       value: e.parts.marketChange,
       always: !e.isEstimate,
     },

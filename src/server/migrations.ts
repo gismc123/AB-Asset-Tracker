@@ -286,6 +286,26 @@ export const MIGRATIONS: Migration[] = [
       if (!columns(db, 'assets').includes('actual_account_id')) db.exec(`ALTER TABLE assets ADD COLUMN actual_account_id TEXT`);
     },
   },
+  {
+    version: 5,
+    description: 'Extra principal paid in transactions of their own: extra_payments',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS extra_payments (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          loan_id           INTEGER NOT NULL REFERENCES loans (id) ON DELETE CASCADE,
+          date              TEXT NOT NULL,
+          amount            INTEGER NOT NULL CHECK (amount > 0),
+          transaction_id    TEXT,
+          transaction_payee TEXT,
+          note              TEXT NOT NULL DEFAULT '',
+          created_at        TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS extra_payments_loan ON extra_payments (loan_id, date);
+        CREATE UNIQUE INDEX IF NOT EXISTS extra_payments_transaction ON extra_payments (loan_id, transaction_id) WHERE transaction_id IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)!.version;

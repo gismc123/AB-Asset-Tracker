@@ -399,6 +399,8 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
           client={client}
           rows={s.rows}
           adjustments={state.adjustments}
+          extraPayments={state.extraPayments}
+          daily={state.setup.interestMethod === 'daily'}
           modules={modules}
           payment={Math.min(payment, s.rows.length)}
           onPaymentChange={setPayment}
@@ -412,7 +414,16 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
         />
       )}
 
-      {shown === 'schedule' && s && <ScheduleView rows={s.rows} modules={modules} currentPayment={s.currentPayment} onOpen={openMonth} />}
+      {shown === 'schedule' && s && (
+        <ScheduleView
+          rows={s.rows}
+          modules={modules}
+          currentPayment={s.currentPayment}
+          onOpen={openMonth}
+          onAddExtra={openMonth}
+          onRemoveExtra={async (id) => setState(await client.deleteExtraPayment(id))}
+        />
+      )}
 
       {shown === 'equity' && state.analysis && <EquityView state={state} client={client} onState={setState} />}
       {shown === 'escrow' && state.analysis && <EscrowView state={state} client={client} onState={setState} />}

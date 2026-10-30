@@ -1,5 +1,5 @@
 import { currentValue, hasProjection, homeAssetFor, projectedValue, type Asset } from './assets.js';
-import { settledRows } from './summary.js';
+import { extrasNotYetSettled, settledRows } from './summary.js';
 import type { Cents, ISODate, LoanSetup, Schedule } from './types.js';
 
 export interface EquityMilestone {
@@ -107,14 +107,17 @@ export function analyzeEquity(
   });
 
   const last = settledIndex >= 0 ? projection[settledIndex]! : null;
-  const balance = settledIndex >= 0 ? schedule.rows[settledIndex]!.endingBalance : setup.originalAmount;
-  const owed = last ? last.owed : setup.originalAmount;
+  // Extra payments already made in a month not settled yet are already off the balance.
+  const pendingExtras = extrasNotYetSettled(schedule.rows, settledIndex >= 0 ? schedule.rows[settledIndex]! : null, today);
+  const balance = (settledIndex >= 0 ? schedule.rows[settledIndex]!.endingBalance : setup.originalAmount) - pendingExtras;
+  const owed = (last ? last.owed : setup.originalAmount) - pendingExtras;
   const equity = homeValue - owed;
 
   let principalPaid = 0;
-  let extraPrincipal = 0;
+  let extraPrincipal = pendingExtras;
   let extraBeforeTracking = 0;
   for (const r of settled) {
+    extraPrincipal += r.extraPayments;
     principalPaid += r.catchUp?.principal ?? 0;
     if (r.skipped) continue;
     principalPaid += r.scheduledPrincipal + r.pennyOffset;

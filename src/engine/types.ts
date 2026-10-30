@@ -190,6 +190,19 @@ export type Adjustment =
 
 export type AdjustmentKind = Adjustment['kind'];
 
+/**
+ * Extra principal paid in a transaction of its own, on its own date, apart
+ * from the regular payment. It lowers the balance from that date: on a
+ * monthly-interest loan from the next payment's interest, on a
+ * daily-interest loan from the day it was paid.
+ */
+export interface ExtraPayment {
+  /** Its id in the database; null for a hypothetical one (what-if). */
+  id: number | null;
+  date: ISODate;
+  amount: Cents;
+}
+
 export interface ScheduleRow {
   payment: number;
   dueDate: ISODate;
@@ -204,7 +217,16 @@ export interface ScheduleRow {
    */
   extraPrincipal: Cents;
   pennyOffset: Cents;
-  /** Total principal paid this month: scheduled + extra + offset. */
+  /**
+   * Extra principal paid in transactions of their own and applied with this
+   * row: on a monthly-interest loan, those dated from this due date up to
+   * the next; on a daily-interest loan, those dated in this interest period.
+   * Part of `principal`, not of `total` (they are separate transactions).
+   */
+  extraPayments: Cents;
+  /** Each of those payments, with the amount applied (less than paid only when it would overpay the loan). */
+  extraPaymentList: ExtraPayment[];
+  /** Total principal paid this month: scheduled + extra + offset + extra payments. */
   principal: Cents;
   /** Required P&I for this month (the last payment is usually smaller). */
   principalAndInterest: Cents;
@@ -233,8 +255,15 @@ export interface ScheduleRow {
   catchUp: PaymentParts | null;
 }
 
-/** Amounts frozen when a month is reconciled as paid. */
-export type LockedPayment = Omit<ScheduleRow, 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking'>;
+/**
+ * Amounts frozen when a month is reconciled as paid: the regular payment
+ * only. Extra payments of their own are applied on top, so adding or
+ * removing one never touches a reconciled month.
+ */
+export type LockedPayment = Omit<
+  ScheduleRow,
+  'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking' | 'extraPayments' | 'extraPaymentList'
+>;
 
 export interface PmiMilestone {
   /** Balance at or below which the milestone is reached. */

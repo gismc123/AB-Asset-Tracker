@@ -182,6 +182,12 @@ export function createApp(deps: AppDeps) {
   loan.delete('/months/:payment/catch-up', (req, res) => {
     res.json(one(req).clearCatchUpPlan(paymentParam(req)));
   });
+  loan.post('/extra-payments', async (req, res) => {
+    res.status(201).json(await one(req).addExtraPayment(req.body));
+  });
+  loan.delete('/extra-payments/:id', (req, res) => {
+    res.json(one(req).deleteExtraPayment(idParam(req)));
+  });
   loan.put('/pmi/removal', (req, res) => {
     res.json(one(req).setPmiRemoval(req.body));
   });

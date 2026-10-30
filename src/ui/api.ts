@@ -77,6 +77,10 @@ export interface LoanClient {
   unskip(payment: number): Promise<StateView>;
   setCatchUpPlan(payment: number, fromPayment: number, months: number): Promise<StateView>;
   clearCatchUpPlan(payment: number): Promise<StateView>;
+  /** Record extra principal paid in a transaction of its own: a bank transaction near payment `payment`, or one entered by hand. */
+  addExtraPayment(extra: { transactionId: string; payment: number; categoryId: string | null } | { date: ISODate; amount: Cents; note: string }): Promise<StateView>;
+  /** Remove one extra payment; the others stay. */
+  deleteExtraPayment(id: number): Promise<StateView>;
   /** Record that PMI stopped from this payment on; replaces an earlier record. */
   setPmiRemoval(fromPayment: number): Promise<StateView>;
   clearPmiRemoval(): Promise<StateView>;
@@ -154,6 +158,8 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       unskip: (n) => call('POST', `${at}/months/${n}/unskip`),
       setCatchUpPlan: (n, fromPayment, months) => call('PUT', `${at}/months/${n}/catch-up`, { fromPayment, months }),
       clearCatchUpPlan: (n) => call('DELETE', `${at}/months/${n}/catch-up`),
+      addExtraPayment: (extra) => call('POST', `${at}/extra-payments`, extra),
+      deleteExtraPayment: (id) => call('DELETE', `${at}/extra-payments/${id}`),
       setPmiRemoval: (fromPayment) => call('PUT', `${at}/pmi/removal`, { fromPayment }),
       clearPmiRemoval: () => call('DELETE', `${at}/pmi/removal`),
       async saveAsset(asset) {

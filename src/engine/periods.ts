@@ -8,6 +8,7 @@ import type { Cents, ISODate, ScheduleRow } from './types.js';
 export interface PeriodTotals {
   /** Regular principal (scheduled principal plus any rounding offset). */
   principal: Cents;
+  /** Extra principal, in the regular payment or in payments of its own (dated by their own date). */
   extraPrincipal: Cents;
   interest: Cents;
   pmi: Cents;
@@ -21,7 +22,7 @@ export interface PeriodTotals {
    * and escrow above; shown separately for reference.
    */
   catchUp: Cents;
-  /** Everything paid: principal + extra + interest + PMI + escrow + fees + deferred repaid. */
+  /** Everything paid: principal + extra (with extra payments of their own) + interest + PMI + escrow + fees + deferred repaid. */
   total: Cents;
   /** Payments made (skipped months not counted). */
   payments: number;
@@ -138,6 +139,18 @@ export function periodBreakouts(
       if (p === periods.loanToDate) {
         if (when <= p.end) add(p.totals, r);
       } else if (when >= p.start && when <= p.end) add(p.totals, dated);
+    }
+  }
+  // Extra payments of their own count on the day they were made, whatever
+  // the state of the month they are applied with.
+  for (const r of rows) {
+    for (const e of r.extraPaymentList) {
+      for (const p of [...Object.values(periods), fullLoan]) {
+        if (p === fullLoan || (e.date <= p.end && (p === periods.loanToDate || e.date >= p.start))) {
+          p.totals.extraPrincipal += e.amount;
+          p.totals.total += e.amount;
+        }
+      }
     }
   }
   return { basis, ...periods, fullLoan };

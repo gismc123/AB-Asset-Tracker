@@ -1,6 +1,7 @@
 import {
   addDays,
   analyzeEquity,
+  dueDateFor,
   compareToSchedule,
   escrowReport,
   isEscrowKind,
@@ -32,6 +33,7 @@ import {
   type Cents,
   type EquityAnalysis,
   type EscrowReport,
+  type ExtraPayment,
   type ISODate,
   type LoanSetup,
   type LockedPayment,
@@ -60,6 +62,7 @@ import {
   type Settings,
   type Store,
   type StoredAdjustment,
+  type StoredExtraPayment,
 } from './db.js';
 import { assetWithLinkedValue, LinkedAccounts } from './linked.js';
 
@@ -102,6 +105,8 @@ export interface StateView {
   } | null;
   summary: LoanSummary | null;
   adjustments: StoredAdjustment[];
+  /** Extra principal paid in transactions of their own. Each row says which it applied. */
+  extraPayments: StoredExtraPayment[];
   details: LoanDetails;
   analysis: {
     /** Null when the loan has no asset. */
@@ -118,6 +123,8 @@ export interface Candidate extends BudgetTransaction {
   difference: Cents;
   /** Another month already matched to this transaction. */
   usedByPayment: number | null;
+  /** The extra payment this transaction is already recorded as, if any. */
+  usedByExtra: number | null;
 }
 
 export interface MatchResult {
@@ -323,11 +330,15 @@ export class LoanService {
     const locked = new Map<number, LockedPayment>();
     for (const m of this.store.listMonths()) if (m.status === 'paid' && m.locked) locked.set(m.payment, m.locked);
     try {
-      return generateSchedule(setup, { adjustments, locked, paidDates: this.paidDates(paidOn) });
+      return generateSchedule(setup, { adjustments, locked, paidDates: this.paidDates(paidOn), extraPayments: this.extraPayments() });
     } catch (e) {
       if (e instanceof SetupError) throw new HttpError(400, e.message, { problems: e.problems });
       throw e;
     }
+  }
+
+  private extraPayments(): ExtraPayment[] {
+    return this.store.listExtraPayments().map((e) => ({ id: e.id, date: e.date, amount: e.amount }));
   }
 
   private row(schedule: Schedule, payment: number): ScheduleRow {
@@ -360,6 +371,7 @@ export class LoanService {
       source: this.source.status(),
       today: this.today(),
       adjustments: this.store.listAdjustments(),
+      extraPayments: this.store.listExtraPayments(),
       details: this.store.getDetails(),
     };
     if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
@@ -424,6 +436,11 @@ export class LoanService {
       if (matched) {
         throw new HttpError(409, `Payment ${matched.payment} is already matched to a bank transaction. Undo it first, or start tracking before it.`);
       }
+      const startDue = dueDateFor(setup.firstPaymentDate, setup.paymentDay, start.payment);
+      const extra = this.store.listExtraPayments().find((e) => e.date <= startDue);
+      if (extra) {
+        throw new HttpError(409, `An extra payment on ${extra.date} is recorded before tracking would start. Remove it first, or start tracking before it.`);
+      }
       const changed = this.store.listAdjustments().find(({ adjustment: a }) => 'payment' in a && a.payment <= start.payment);
       if (changed && 'payment' in changed.adjustment) {
         throw new HttpError(
@@ -479,6 +496,7 @@ export class LoanService {
           matchesSchedule: cmp.matches,
           difference: cmp.difference,
           usedByPayment: usedBy === payment ? null : usedBy,
+          usedByExtra: this.store.extraForTransaction(t.id),
         };
       })
       .sort((a, b) => Number(b.matchesSchedule) - Number(a.matchesSchedule) || a.date.localeCompare(b.date));
@@ -497,6 +515,9 @@ export class LoanService {
     const usedBy = this.store.monthForTransaction(transactionId);
     if (usedBy !== null && usedBy !== payment) {
       throw new HttpError(409, `That transaction is already matched to payment ${usedBy}`);
+    }
+    if (this.store.extraForTransaction(transactionId) !== null) {
+      throw new HttpError(409, 'That transaction is already recorded as an extra payment. Remove the extra payment first.');
     }
 
     const cat = this.categoryOrThrow(b.categoryId);
@@ -595,6 +616,59 @@ export class LoanService {
       this.store.deleteManualOffset(payment);
       if (amount !== 0) this.store.addAdjustment({ kind: 'pennyOffset', payment, amount: amount as number }, null);
     });
+    return this.state();
+  }
+
+  // --- extra payments of their own ------------------------------------------------
+
+  /**
+   * Record extra principal paid in a transaction of its own. Either
+   * `{ transactionId, payment, categoryId? }`, a bank transaction found near
+   * payment `payment`'s due date, or `{ date, amount, note? }` entered by
+   * hand. It applies on its own date; later months recalculate.
+   */
+  async addExtraPayment(body: unknown) {
+    const b = bodyOf(body);
+    const setup = this.requireSetup();
+    const schedule = this.build(setup);
+    let extra: Omit<StoredExtraPayment, 'id' | 'createdAt'>;
+
+    if (b.transactionId !== undefined) {
+      const transactionId = typeof b.transactionId === 'string' ? b.transactionId : '';
+      if (!transactionId) throw new HttpError(400, 'transactionId must be a transaction id');
+      const near = this.row(schedule, Number.isInteger(b.payment) ? (b.payment as number) : Number.NaN);
+      if (this.store.extraForTransaction(transactionId) !== null) throw new HttpError(409, 'That transaction is already recorded as an extra payment');
+      const usedBy = this.store.monthForTransaction(transactionId);
+      if (usedBy !== null) throw new HttpError(409, `That transaction is already matched to payment ${usedBy}. Undo that first.`);
+      const cat = this.categoryOrThrow(b.categoryId);
+      const txn = (await this.fetchAround(cat, near.dueDate, WIDE_WINDOW, WIDE_WINDOW)).find((t) => t.id === transactionId);
+      if (!txn) throw new HttpError(404, "That transaction was not found in this loan's category near this due date");
+      if (txn.amount >= 0) throw new HttpError(400, 'That transaction is a deposit, not a payment');
+      extra = { date: txn.date, amount: -txn.amount, transactionId: txn.id, transactionPayee: txn.payee, note: '' };
+    } else {
+      extra = { date: dateField(b, 'date'), amount: amountField(b, 'amount'), transactionId: null, transactionPayee: null, note: textField(b, 'note', 200) };
+    }
+
+    if (extra.date < setup.openDate) throw new HttpError(400, 'An extra payment has to be on or after the loan open date');
+    const start = setup.startingPoint;
+    if (start && extra.date <= dueDateFor(setup.firstPaymentDate, setup.paymentDay, start.payment)) {
+      throw new HttpError(409, 'That date is before tracking starts; the starting balance already includes anything paid then');
+    }
+
+    this.root.transaction(() => {
+      const id = this.store.addExtraPayment(extra);
+      // The schedule never lets an extra overpay the loan; refuse one that would.
+      const applied = this.build(setup).rows.flatMap((r) => r.extraPaymentList).find((e) => e.id === id);
+      if (!applied || applied.amount < extra.amount) {
+        throw new HttpError(400, "That's more than the balance left on that date. Record only what went to principal.");
+      }
+    });
+    return this.state();
+  }
+
+  /** Remove one extra payment. Every other one, and every reconciled month, stays as it is. */
+  deleteExtraPayment(id: number) {
+    if (!this.store.deleteExtraPayment(id)) throw new HttpError(404, 'That extra payment is not on file');
     return this.state();
   }
 

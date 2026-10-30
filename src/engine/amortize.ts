@@ -3,6 +3,7 @@ import { dailyInterest, monthlyInterest, roundCents, standardPayment } from './m
 import type {
   Adjustment,
   Cents,
+  ExtraPayment,
   ISODate,
   LoanModules,
   LoanSetup,
@@ -28,6 +29,8 @@ export interface GenerateOptions {
    * use it: interest runs up to the date the payment was made.
    */
   paidDates?: ReadonlyMap<number, ISODate>;
+  /** Extra principal paid in transactions of their own (see `ExtraPayment`). */
+  extraPayments?: readonly ExtraPayment[];
 }
 
 /** Loans saved before modules existed were all mortgages, with both. */
@@ -153,6 +156,52 @@ function skipAt(adjustments: readonly Adjustment[], k: number): SkipMode | null 
 /** Fields a row has when nothing was skipped. */
 const NOT_SKIPPED = { skipped: null, capitalizedInterest: 0, deferred: 0, deferredRepaid: 0, pastDue: 0, catchUp: null } as const;
 
+/** Fields a row has when no extra payment of its own is applied with it. */
+const NO_EXTRA_PAYMENTS = { extraPayments: 0, extraPaymentList: [] as ExtraPayment[] };
+
+/**
+ * Apply `events` (extra payments) to `balance` in date order, never below
+ * zero. Returns what was applied and what is left.
+ */
+function applyExtras(balance: Cents, events: readonly ExtraPayment[]): { applied: ExtraPayment[]; balance: Cents } {
+  const applied: ExtraPayment[] = [];
+  for (const e of events) {
+    const amount = Math.min(e.amount, balance);
+    applied.push({ ...e, amount });
+    balance -= amount;
+  }
+  return { applied, balance };
+}
+
+/**
+ * Daily interest over one period when extra payments land inside it: each
+ * stretch of days accrues on the balance at the time, so a payment on the
+ * 10th cuts interest only from the 10th on. Rounded once, like a single
+ * period. Returns the interest and the balance after the extras.
+ */
+function dailyInterestWithExtras(
+  balance: Cents,
+  annualRatePercent: number,
+  start: ISODate,
+  end: ISODate,
+  events: readonly ExtraPayment[],
+): { interest: Cents; applied: ExtraPayment[]; balance: Cents } {
+  let balanceDays = 0;
+  let at = start;
+  const applied: ExtraPayment[] = [];
+  for (const e of events) {
+    // An extra carried over from a skipped month counts from the start of this period.
+    const on = e.date < at ? at : e.date > end ? end : e.date;
+    balanceDays += balance * Math.max(0, daysBetween(at, on));
+    const amount = Math.min(e.amount, balance);
+    applied.push({ ...e, amount });
+    balance -= amount;
+    at = on;
+  }
+  balanceDays += balance * Math.max(0, daysBetween(at, end));
+  return { interest: roundCents((balanceDays * annualRatePercent) / 36_500), applied, balance };
+}
+
 const noParts = (): PaymentParts => ({ principal: 0, interest: 0, pmi: 0, escrow: 0, total: 0 });
 function addParts(a: PaymentParts, b: PaymentParts) {
   a.principal += b.principal;
@@ -260,6 +309,7 @@ function amortize(
   locked: ReadonlyMap<number, LockedPayment>,
   withExtras: boolean,
   paidDates: ReadonlyMap<number, ISODate> = new Map(),
+  extraPayments: readonly ExtraPayment[] = [],
 ): ScheduleRow[] {
   const rows: ScheduleRow[] = [];
   const termMonths = termMonthsOf(setup);
@@ -273,6 +323,12 @@ function amortize(
   let lastDate = setup.openDate;
   let capitalizedSkips = 0;
   const escrowAt = (k: number) => (escrowOn ? valueFrom(adjustments, 'escrow', k, setup.escrowMonthly).amount : 0);
+  // Extra payments in date order. Those dated on or before the last payment
+  // made before tracking are already in the starting balance.
+  const trackedFrom = start ? dueDateFor(setup.firstPaymentDate, setup.paymentDay, start.payment) : null;
+  const pending = withExtras
+    ? extraPayments.filter((e) => e.amount > 0 && (trackedFrom === null || e.date > trackedFrom)).sort((a, b) => a.date.localeCompare(b.date))
+    : [];
 
   for (let k = 1; balance > 0; k++) {
     if (k > MAX_PAYMENTS) {
@@ -283,9 +339,20 @@ function amortize(
     const periodEnd = (withExtras && paidDates.get(k)) || dueDate;
     const periodStart = lastDate;
     lastDate = periodEnd;
+    // Extra payments that belong to this row: on a daily loan, those in its
+    // interest period; on a monthly loan, those before the next due date.
+    const nextDue = dueDateFor(setup.firstPaymentDate, setup.paymentDay, k + 1);
+    const takeExtras = () => {
+      let n = 0;
+      while (n < pending.length && (daily ? pending[n]!.date <= periodEnd : pending[n]!.date < nextDue)) n++;
+      return pending.splice(0, n);
+    };
 
     if (lock) {
-      const principal = Math.min(lock.principal, balance);
+      const regular = Math.min(lock.principal, balance);
+      // Interest is locked; extra payments still lower the balance, after the regular payment.
+      const extras = applyExtras(balance - regular, takeExtras());
+      const extraPayments = balance - regular - extras.balance;
       // Locks saved before skips or fees existed lack those fields.
       rows.push({
         ...NOT_SKIPPED,
@@ -294,21 +361,37 @@ function amortize(
         payment: k,
         dueDate,
         beginningBalance: balance,
-        principal,
-        endingBalance: balance - principal,
+        principal: regular + extraPayments,
+        extraPayments,
+        extraPaymentList: extras.applied,
+        endingBalance: extras.balance,
         locked: true,
         beforeTracking: false,
       });
-      balance -= principal;
+      balance = extras.balance;
       continue;
     }
 
     // Before tracking, payments follow the original schedule: no skips, offsets or extras.
     const beforeTracking = start !== null && k <= start.payment;
     const skip = withExtras && !beforeTracking ? skipAt(adjustments, k) : null;
-    const interest = daily
-      ? dailyInterest(balance, setup.annualRatePercent, Math.max(0, daysBetween(periodStart, periodEnd)))
-      : monthlyInterest(balance, setup.annualRatePercent);
+    // A skipped month takes no extra payments; they carry over to the next payment made.
+    const extrasHere = beforeTracking || skip ? [] : takeExtras();
+    let interest: Cents;
+    // The balance the regular payment can pay down: on a daily loan, what's
+    // left after extras paid earlier in the period.
+    let available = balance;
+    let dailyApplied: ExtraPayment[] | null = null;
+    if (daily && extrasHere.length) {
+      const d = dailyInterestWithExtras(balance, setup.annualRatePercent, periodStart, periodEnd, extrasHere);
+      interest = d.interest;
+      available = d.balance;
+      dailyApplied = d.applied;
+    } else {
+      interest = daily
+        ? dailyInterest(balance, setup.annualRatePercent, Math.max(0, daysBetween(periodStart, periodEnd)))
+        : monthlyInterest(balance, setup.annualRatePercent);
+    }
     const empty = {
       payment: k,
       dueDate,
@@ -327,6 +410,7 @@ function amortize(
       rows.push({
         ...empty,
         ...NOT_SKIPPED,
+        ...NO_EXTRA_PAYMENTS,
         interest: 0,
         scheduledPrincipal: 0,
         principal: 0,
@@ -346,16 +430,16 @@ function amortize(
         `Payment ${k}: the P&I payment does not cover the month's interest, so the loan would never pay off`,
       ]);
     }
-    scheduledPrincipal = Math.min(scheduledPrincipal, balance);
+    scheduledPrincipal = Math.min(scheduledPrincipal, available);
     // Rounding the payment to the cent leaves a few cents over at the end of
     // the term. Like lenders do, fold that residue into the final payment
     // instead of creating a tiny extra one. Only a small residue: after a
     // skipped payment the loan genuinely runs longer.
-    if (k >= termMonths && balance - scheduledPrincipal <= Math.max(100, Math.round(pi * 0.02))) scheduledPrincipal = balance;
+    if (k >= termMonths && available - scheduledPrincipal <= Math.max(100, Math.round(pi * 0.02))) scheduledPrincipal = available;
     // Daily interest makes the residue depend on the calendar, so the
     // scheduled last payment always settles the loan (later if interest was
     // added by skips).
-    if (daily && k >= termMonths + capitalizedSkips) scheduledPrincipal = balance;
+    if (daily && k >= termMonths + capitalizedSkips) scheduledPrincipal = available;
 
     if (skip === 'defer' || skip === 'catchUp') {
       // The balance moves as if this installment were paid; what's missed is
@@ -366,6 +450,7 @@ function amortize(
       rows.push({
         ...empty,
         ...NOT_SKIPPED,
+        ...NO_EXTRA_PAYMENTS,
         interest,
         scheduledPrincipal,
         principal: scheduledPrincipal,
@@ -383,7 +468,7 @@ function amortize(
     }
 
     let pennyOffset = withExtras && !beforeTracking ? sumFor(adjustments, 'pennyOffset', k) : 0;
-    pennyOffset = Math.max(-scheduledPrincipal, Math.min(pennyOffset, balance - scheduledPrincipal));
+    pennyOffset = Math.max(-scheduledPrincipal, Math.min(pennyOffset, available - scheduledPrincipal));
 
     let extra: Cents;
     if (beforeTracking) {
@@ -393,10 +478,15 @@ function amortize(
       extra = k === start!.payment ? balance - scheduledPrincipal - start!.balance : 0;
     } else {
       extra = withExtras ? standingExtraAt(setup, adjustments, k) + sumFor(adjustments, 'extraPrincipal', k) : 0;
-      extra = Math.max(0, Math.min(extra, balance - scheduledPrincipal - pennyOffset));
+      extra = Math.max(0, Math.min(extra, available - scheduledPrincipal - pennyOffset));
     }
 
-    const principal = scheduledPrincipal + pennyOffset + extra;
+    // On a monthly loan, extra payments come off after the regular payment.
+    const extras = dailyApplied
+      ? { applied: dailyApplied, balance: available - scheduledPrincipal - pennyOffset - extra }
+      : applyExtras(available - scheduledPrincipal - pennyOffset - extra, extrasHere);
+    const extraPayments = extras.applied.reduce((sum, e) => sum + e.amount, 0);
+    const principal = scheduledPrincipal + pennyOffset + extra + extraPayments;
     const escrow = escrowAt(k);
     const principalAndInterest = scheduledPrincipal + interest;
 
@@ -408,6 +498,8 @@ function amortize(
       scheduledPrincipal,
       extraPrincipal: extra,
       pennyOffset,
+      extraPayments,
+      extraPaymentList: extras.applied,
       principal,
       principalAndInterest,
       pmi: 0,
@@ -450,7 +542,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
   const calculatedPiPayment = standardPayment(setup.originalAmount, setup.annualRatePercent, months);
   const piPayment = setup.piPaymentOverride ?? calculatedPiPayment;
 
-  const rows = amortize(setup, piPayment, adjustments, locked, true, options.paidDates);
+  const rows = amortize(setup, piPayment, adjustments, locked, true, options.paidDates, options.extraPayments);
   const start = setup.startingPoint;
   if (start && rows.length <= start.payment) {
     throw new SetupError([`The original schedule pays the loan off by payment ${rows.length}, before tracking starts`]);
@@ -542,6 +634,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
 export function lockRow(row: ScheduleRow): LockedPayment {
   if (row.skipped) throw new Error(`Payment ${row.payment} is skipped and can't be locked as paid`);
   if (row.beforeTracking) throw new Error(`Payment ${row.payment} was made before tracking began and can't be locked`);
-  const { beginningBalance: _b, endingBalance: _e, locked: _l, dueDate: _d, beforeTracking: _t, ...rest } = row;
-  return rest;
+  const { beginningBalance: _b, endingBalance: _e, locked: _l, dueDate: _d, beforeTracking: _t, extraPayments, extraPaymentList: _x, ...rest } = row;
+  // The lock is the regular payment only; extra payments are applied on top of it.
+  return { ...rest, principal: rest.principal - extraPayments };
 }

@@ -25,7 +25,7 @@ import {
   type LoanSetup,
   type LockedPayment,
 } from '../engine/index.js';
-import type { AssetRecord, LoanDetails, LoanRecord } from '../server/db.js';
+import type { AssetRecord, LoanDetails, LoanRecord, StoredExtraPayment } from '../server/db.js';
 import type { MonthView, StateView } from '../server/service.js';
 import { ApiError, type BudgetAccount, type Candidate, type CategoryGroup, type LoanClient, type LoanListItem, type TrackerClient } from './api.js';
 import { mountTrackerApp } from './mount.js';
@@ -98,6 +98,10 @@ interface Seed {
   paid: number;
   /** Payment whose bank amount includes $250 of extra principal (left unreconciled). */
   extraOn: number | null;
+  /** Extra principal paid in transactions of their own, already recorded: [date, amount]. */
+  extras: [string, number][];
+  /** A payment of its own in the bank, not recorded yet, to try adding: [date, amount]. */
+  spareExtra: [string, number] | null;
   escrow: EscrowEntry[];
   details: LoanDetails;
 }
@@ -113,6 +117,8 @@ const SEEDS: Seed[] = [
     categoryId: 'cat-mortgage',
     paid: 4,
     extraOn: 5,
+    extras: [['2025-06-18', 100_000]],
+    spareExtra: ['2025-08-08', 50_000],
     escrow: [
       { id: 1, date: '2025-02-14', kind: 'deposit', amount: 164_000, note: 'Initial deposit at closing' },
       { id: 2, date: '2025-06-20', kind: 'homeownersInsurance', amount: 216_000, note: 'Annual premium' },
@@ -130,6 +136,8 @@ const SEEDS: Seed[] = [
     categoryId: 'cat-car',
     paid: 6,
     extraOn: null,
+    extras: [['2025-07-22', 75_000]],
+    spareExtra: null,
     escrow: [],
     details: { fields: { servicerName: 'Sample Auto Finance', licensePlate: 'SAMPLE 1' }, custom: [] },
   },
@@ -140,6 +148,8 @@ const SEEDS: Seed[] = [
     categoryId: 'cat-loans',
     paid: 8,
     extraOn: null,
+    extras: [],
+    spareExtra: null,
     escrow: [],
     details: { fields: { servicerName: 'Sample Credit Union' }, custom: [] },
   },
@@ -189,6 +199,7 @@ class MockLoan {
   txns: Candidate[] = [];
   escrow: EscrowEntry[];
   details: LoanDetails;
+  extras: StoredExtraPayment[] = [];
 
   constructor(seed: Seed | { loan: LoanRecord; setup: LoanSetup; asset: Omit<AssetRecord, 'id' | 'loanId'> | null }) {
     this.loan = seed.loan;
@@ -205,8 +216,18 @@ class MockLoan {
       this.txns.push({
         id: `l${seed.loan.id}-t${k}`, date: addDays(r.dueDate, -2), amount: -(r.total + (k === seed.extraOn ? 25_000 : 0)),
         payee: seed.details.fields.servicerName ?? 'Sample Lender', account: 'Checking', notes: null, isSplitPart: false,
-        paid: 0, matchesSchedule: false, difference: 0, usedByPayment: null,
+        paid: 0, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null,
       });
+    }
+    const payee = seed.details.fields.servicerName ?? 'Sample Lender';
+    seed.extras.forEach(([date, amount], i) => {
+      const id = `l${seed.loan.id}-x${i}`;
+      this.txns.push({ id, date, amount: -amount, payee, account: 'Savings', notes: null, isSplitPart: false, paid: 0, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null });
+      this.extras.push({ id: nextId++, date, amount, transactionId: id, transactionPayee: payee, note: '', createdAt: '' });
+    });
+    if (seed.spareExtra) {
+      const [date, amount] = seed.spareExtra;
+      this.txns.push({ id: `l${seed.loan.id}-spare`, date, amount: -amount, payee, account: 'Savings', notes: null, isSplitPart: false, paid: 0, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null });
     }
     for (let k = 1; k <= seed.paid; k++) {
       const txn = this.txns[k - 1]!;
@@ -219,14 +240,15 @@ class MockLoan {
     const locked = new Map([...this.months].filter(([, m]) => m.locked).map(([k, m]) => [k, m.locked!]));
     const paidDates = new Map([...this.months].map(([k, m]) => [k, m.txn.date]));
     if (paidOn) paidDates.set(paidOn[0], paidOn[1]);
-    return generateSchedule(this.setup!, { adjustments: this.adjustments.map((a) => a.adj), locked, paidDates });
+    const extraPayments = this.extras.map((e) => ({ id: e.id, date: e.date, amount: e.amount }));
+    return generateSchedule(this.setup!, { adjustments: this.adjustments.map((a) => a.adj), locked, paidDates, extraPayments });
   }
 
   state(): StateView {
     const linked = this.asset ? withAccountValue(this.asset, reading(this.asset.actualAccountId)) : null;
     const base = {
       loan: this.loan, asset: this.asset, assetValue: linked?.source ?? null, setup: this.setup, settings: { categoryId: this.categoryId },
-      source: { connected: true, lastSync: null, error: null }, today: TODAY, details: this.details,
+      source: { connected: true, lastSync: null, error: null }, today: TODAY, details: this.details, extraPayments: this.extras,
       adjustments: this.adjustments.map((a, i) => ({ id: i + 1, adjustment: a.adj, sourcePayment: a.source, createdAt: '' })),
     };
     if (!this.setup) return { ...base, schedule: null, summary: null, analysis: null };
@@ -299,7 +321,8 @@ class MockLoan {
         return later(self.txns
           .filter((t) => Math.abs(Date.parse(t.date) - Date.parse(row.dueDate)) < 25 * 864e5)
           .map((t) => { const c = compareToSchedule(row, t.amount); const u = used.get(t.id);
-            return { ...t, paid: c.actual, matchesSchedule: c.matches, difference: c.difference, usedByPayment: u && u !== n ? u : null }; }));
+            const x = self.extras.find((e) => e.transactionId === t.id)?.id ?? null;
+            return { ...t, paid: c.actual, matchesSchedule: c.matches, difference: c.difference, usedByPayment: u && u !== n ? u : null, usedByExtra: x }; }));
       },
       async match(n, id) {
         const txn = self.txns.find((t) => t.id === id)!;
@@ -343,6 +366,20 @@ class MockLoan {
         const covering = self.coveringPlan(n);
         if (covering) self.adjustments.splice(self.adjustments.indexOf(covering), 1);
         self.adjustments.push({ adj: { kind: 'catchUpPlan', fromPayment, months }, source: null });
+        return state();
+      },
+      async addExtraPayment(extra) {
+        if ('transactionId' in extra) {
+          const t = self.txns.find((x) => x.id === extra.transactionId)!;
+          self.extras.push({ id: nextId++, date: t.date, amount: -t.amount, transactionId: t.id, transactionPayee: t.payee, note: '', createdAt: '' });
+        } else {
+          self.extras.push({ id: nextId++, ...extra, transactionId: null, transactionPayee: null, createdAt: '' });
+        }
+        self.extras.sort((a, b) => a.date.localeCompare(b.date));
+        return state();
+      },
+      async deleteExtraPayment(id) {
+        self.extras = self.extras.filter((e) => e.id !== id);
         return state();
       },
       async setPmiRemoval(fromPayment) {

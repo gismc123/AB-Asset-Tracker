@@ -116,3 +116,15 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **When Actual can't be read, a balance read earlier is kept and flagged; with none, the entered values are used.** A dashboard or the Loans screen keeps working while Actual restarts, and says why the number may be old.
 - **Balances are read only for linked accounts, at most every 30 seconds, and only on the loan list, loan state and summary requests.** A tracker with no links never asks Actual for a balance, so existing installs see no new traffic.
 - **The summary endpoint's `valueSource` says `Actual account`, without the account's name.** The name is the user's own label and the endpoint never carried account details.
+
+### Extra payments of their own
+
+- **Extra payments live in their own table (`extra_payments`, migration 5), not in `months`.** A month keeps exactly one regular match, as before, and any number of extras sit beside it. Nothing about how v0.1.0 data is stored changes.
+- **An extra is placed by its own date, not by the month it was added from.** On a monthly-interest loan it comes off after the last payment due on or before its date, so the next payment's interest is lower (how monthly-accrual servicers apply a curtailment). On a daily-interest loan it lands inside the interest period that contains its date, and interest is split at that day. The Reconcile screen says when an extra lands with another month.
+- **Extras are part of `principal` but not of `total`.** `total` is what the regular transaction should be, so matching it is unchanged; principal, the balance, totals and every date after it include the extra.
+- **A reconciled month's lock holds the regular payment only, and extras are applied on top.** Adding or removing an extra never changes a reconciled month, and undo removes exactly one extra.
+- **An extra dated in a month that isn't reconciled yet still lowers today's balance, equity and payoff.** The money has left; waiting for the next reconciliation would understate equity.
+- **A skipped month takes no extras; they carry to the next payment made.** Keeps the skip rules simple. On a daily loan the carried extra counts from the start of that next period (see KNOWN_LIMITATIONS).
+- **Extras dated on or before the last payment made before tracking are ignored, and the service refuses them.** The statement balance used as the starting point already includes them.
+- **An extra that would overpay the loan is refused.** The schedule caps extras at the balance; refusing at entry keeps the stored amount equal to what was applied.
+- **Extras can come from Actual (any unused payment in the loan's category near the month) or be entered by hand.** An extra paid from another account or category still counts. A bank transaction can be used once, as a regular match or as one extra.

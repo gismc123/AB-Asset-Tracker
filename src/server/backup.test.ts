@@ -42,6 +42,7 @@ async function fill() {
   f.one.addEscrowEntry({ date: '2025-05-01', kind: 'propertyTax', amount: 120_000, note: 'County' });
   f.one.saveDetails({ fields: { loanNumber: 'SAMPLE-1' }, custom: [{ label: 'Gate code', value: '0000' }] });
   f.service.addAssetValue(f.store.assetForLoan(f.home.id)!.id, { date: '2025-06-01', value: 36_000_000, source: 'Appraisal' });
+  await f.one.addExtraPayment({ date: '2025-04-20', amount: 50_000, note: 'Bonus' });
   f.service.setArchived(f.car.id, true);
   return f;
 }
@@ -61,7 +62,7 @@ describe('backup and restore', () => {
     const { service } = await fill();
     const backup = JSON.parse(JSON.stringify(service.backup())) as Backup;
     expect(backup).toMatchObject({ format: 'ab-asset-tracker-backup', formatVersion: 1, schemaVersion: LATEST_VERSION });
-    expect(backup.counts).toMatchObject({ loans: 2, assets: 1, asset_values: 1, months: 1, escrow_entries: 1, loan_details: 1 });
+    expect(backup.counts).toMatchObject({ loans: 2, assets: 1, asset_values: 1, months: 1, escrow_entries: 1, loan_details: 1, extra_payments: 1 });
     expect(backup.tables).not.toHaveProperty('schema_version');
 
     const fresh = new TrackerService(new Store(':memory:'), new FakeSource(), () => '2025-06-15');

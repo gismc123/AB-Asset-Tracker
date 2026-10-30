@@ -62,6 +62,19 @@ export interface StoredAdjustment {
   createdAt: string;
 }
 
+/** Extra principal paid in a transaction of its own (see `ExtraPayment`). */
+export interface StoredExtraPayment {
+  id: number;
+  date: ISODate;
+  /** Positive cents. */
+  amount: Cents;
+  /** The bank transaction in Actual, or null when entered by hand. */
+  transactionId: string | null;
+  transactionPayee: string | null;
+  note: string;
+  createdAt: string;
+}
+
 export interface Settings {
   /** The Actual category this loan's payments are booked to. */
   categoryId: string | null;
@@ -401,6 +414,36 @@ export class LoanStore {
 
   deleteMonth(payment: number) {
     this.db.prepare(`DELETE FROM months WHERE loan_id = ? AND payment = ?`).run(this.loanId, payment);
+  }
+
+  // --- extra payments of their own ------------------------------------------------
+
+  listExtraPayments(): StoredExtraPayment[] {
+    return this.db
+      .prepare(
+        `SELECT id, date, amount, transaction_id AS transactionId, transaction_payee AS transactionPayee, note, created_at AS createdAt
+         FROM extra_payments WHERE loan_id = ? ORDER BY date, id`,
+      )
+      .all(this.loanId) as StoredExtraPayment[];
+  }
+
+  addExtraPayment(e: Omit<StoredExtraPayment, 'id' | 'createdAt'>): number {
+    const result = this.db
+      .prepare(`INSERT INTO extra_payments (loan_id, date, amount, transaction_id, transaction_payee, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(this.loanId, e.date, e.amount, e.transactionId, e.transactionPayee, e.note, new Date().toISOString());
+    return Number(result.lastInsertRowid);
+  }
+
+  deleteExtraPayment(id: number): boolean {
+    return this.db.prepare(`DELETE FROM extra_payments WHERE id = ? AND loan_id = ?`).run(id, this.loanId).changes > 0;
+  }
+
+  /** The extra payment matched to this bank transaction, if any. */
+  extraForTransaction(transactionId: string): number | null {
+    const row = this.db.prepare(`SELECT id FROM extra_payments WHERE loan_id = ? AND transaction_id = ?`).get(this.loanId, transactionId) as
+      | { id: number }
+      | undefined;
+    return row?.id ?? null;
   }
 
   // --- escrow entries ---------------------------------------------------------------
