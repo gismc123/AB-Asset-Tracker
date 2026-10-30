@@ -914,7 +914,9 @@ Click **Backup** at the end of the loan tabs (on a fresh install, use
 - **Download backup** saves everything in the tracker as one file, named
   like `ab-asset-tracker-backup-2026-10-28.json`: every loan (archived ones
   too) with its setup, category, reconciled months, skips, catch-up plans,
-  escrow entries and details, and every asset with its value history.
+  extra payments, months imported from the lender's table, escrow entries
+  and details, and every asset with its value history. Links to Actual
+  accounts are kept as account ids.
 - **Restore** loads a backup file. You see what's in it (when it was made,
   which loans) before anything changes, then **Replace with this backup**
   swaps it in. Restoring replaces everything in the tracker, so first a copy

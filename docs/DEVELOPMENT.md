@@ -22,13 +22,14 @@ wrapper, which runs the same commands in the official Node image:
 
 **Preview the screens without Actual.** After a build, open
 `dist/ui/preview.html` in a browser. It runs the real components against an
-in-memory mock with three made-up loans and a mock sidebar. Add
+in-memory mock with four made-up loans and a mock sidebar. Add
 `?theme=dark`, `?empty` (first-run screen), `?privacy`, or `?loan=2`.
 
 **Tests use no real Actual server or data.** Backend tests run against an
 in-memory database and a fake Actual source (`src/server/testing.ts`). The
-migration tests load databases in the tracker's first schema
-(`test/fixtures`) and check the migrated loan matches its numbers exactly.
+migration tests load databases in the tracker's first schema and a v0.1.0
+database (`test/fixtures`) and check every loan still matches its numbers
+exactly.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for how to propose changes, and
 [docs/DECISIONS.md](DECISIONS.md),
@@ -39,7 +40,7 @@ planned.
 ## Project layout
 
 ```
-src/engine/      Amortization, interest, fees, skips, PMI, reconciliation, equity, assets, escrow, period totals (pure, tested)
+src/engine/      Amortization, interest, fees, extra payments, skips, PMI, reconciliation, equity, assets, escrow, period totals, what-if, effective rate, lender's table (pure, tested)
 src/server/      Backend: config, read-only Actual adapter, SQLite store and migrations, services, HTTP API
 src/ui/          Loan screens (React), sidebar list, API client, styles, preview
 src/inject/      The one script the proxy injects into Actual's page
