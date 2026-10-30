@@ -18,6 +18,8 @@ import {
   periodBreakouts,
   resolutionToAdjustment,
   summarize,
+  withAccountValue,
+  type AccountReading,
   type Adjustment,
   type EscrowEntry,
   type LoanSetup,
@@ -25,7 +27,7 @@ import {
 } from '../engine/index.js';
 import type { AssetRecord, LoanDetails, LoanRecord } from '../server/db.js';
 import type { MonthView, StateView } from '../server/service.js';
-import { ApiError, type Candidate, type CategoryGroup, type LoanClient, type LoanListItem, type TrackerClient } from './api.js';
+import { ApiError, type BudgetAccount, type Candidate, type CategoryGroup, type LoanClient, type LoanListItem, type TrackerClient } from './api.js';
 import { mountTrackerApp } from './mount.js';
 import { mountSidebarLoans } from './sidebar.js';
 
@@ -105,7 +107,7 @@ const SEEDS: Seed[] = [
     loan: { id: 1, nickname: 'Mortgage', type: 'mortgage', createdAt: '', archived: false },
     setup: MORTGAGE,
     asset: {
-      name: 'Home', kind: 'home', originalValue: 35_500_000, valueTrend: 'manual', trendRatePercent: null, acquiredDate: '2025-02-14',
+      name: 'Home', kind: 'home', originalValue: 35_500_000, valueTrend: 'manual', trendRatePercent: null, acquiredDate: '2025-02-14', actualAccountId: null,
       values: [{ id: 1, date: '2025-09-01', value: 36_800_000, source: 'Online estimate' }],
     },
     categoryId: 'cat-mortgage',
@@ -122,6 +124,7 @@ const SEEDS: Seed[] = [
     setup: CAR,
     asset: {
       name: 'Sample hatchback', kind: 'vehicle', originalValue: 3_600_000, valueTrend: 'depreciating', trendRatePercent: 15, acquiredDate: '2025-03-10',
+      actualAccountId: 'acct-car-value',
       values: [{ id: 2, date: '2025-09-15', value: 3_250_000, source: 'Pricing guide' }],
     },
     categoryId: 'cat-car',
@@ -147,6 +150,20 @@ const CATEGORIES: CategoryGroup[] = [
   { id: 'g2', name: 'Transportation', categories: [{ id: 'cat-car', name: 'Car payment' }] },
   { id: 'g3', name: 'Debt', categories: [{ id: 'cat-loans', name: 'Loan payments' }] },
 ];
+
+/** Made-up accounts in the mock budget, with their balances in cents. */
+const ACCOUNTS: (BudgetAccount & { balance: number })[] = [
+  { id: 'acct-checking', name: 'Checking', offBudget: false, closed: false, balance: 412_300 },
+  { id: 'acct-home-value', name: 'Home value', offBudget: true, closed: false, balance: 36_900_000 },
+  { id: 'acct-car-value', name: 'Hatchback value', offBudget: true, closed: false, balance: 3_190_000 },
+  { id: 'acct-mortgage', name: 'Mortgage balance', offBudget: true, closed: false, balance: -31_741_582 },
+];
+
+function reading(id: string | null): AccountReading | null {
+  const a = ACCOUNTS.find((x) => x.id === id);
+  if (!id) return null;
+  return a ? { id, name: a.name, balance: a.balance, asOf: TODAY, error: null } : { id, name: null, balance: null, asOf: null, error: "That account isn't in the budget any more" };
+}
 
 // --- mock backend ---------------------------------------------------------------------
 
@@ -206,8 +223,9 @@ class MockLoan {
   }
 
   state(): StateView {
+    const linked = this.asset ? withAccountValue(this.asset, reading(this.asset.actualAccountId)) : null;
     const base = {
-      loan: this.loan, asset: this.asset, setup: this.setup, settings: { categoryId: this.categoryId },
+      loan: this.loan, asset: this.asset, assetValue: linked?.source ?? null, setup: this.setup, settings: { categoryId: this.categoryId },
       source: { connected: true, lastSync: null, error: null }, today: TODAY, details: this.details,
       adjustments: this.adjustments.map((a, i) => ({ id: i + 1, adjustment: a.adj, sourcePayment: a.source, createdAt: '' })),
     };
@@ -226,7 +244,7 @@ class MockLoan {
     });
     const paid = new Set([...this.months].filter(([, m]) => m.status === 'paid').map(([k]) => k));
     const paidOn = new Map([...this.months].filter(([, m]) => m.status === 'paid').map(([k, m]) => [k, m.txn.date]));
-    const asset = this.asset;
+    const asset = linked?.asset ?? null;
     return {
       ...base,
       schedule: { piPayment: s.piPayment, calculatedPiPayment: s.calculatedPiPayment, totals: s.totals, pmi: s.pmi, rows,
@@ -344,7 +362,15 @@ class MockLoan {
         return state();
       },
       async saveAsset(a) {
-        self.asset = { ...a, id: self.asset?.id ?? nextId++, loanId: self.loan.id, values: self.asset?.values ?? [] };
+        self.asset = {
+          ...a, id: self.asset?.id ?? nextId++, loanId: self.loan.id, values: self.asset?.values ?? [],
+          actualAccountId: a.actualAccountId === undefined ? (self.asset?.actualAccountId ?? null) : a.actualAccountId,
+        };
+        return state();
+      },
+      accounts: () => later(ACCOUNTS.map(({ balance: _b, ...a }) => a)),
+      async setAssetAccount(_assetId, accountId) {
+        self.asset = { ...self.asset!, actualAccountId: accountId };
         return state();
       },
       async addAssetValue(_assetId, v) {
@@ -376,7 +402,7 @@ function mockClient(empty: boolean): TrackerClient {
       const home = type === 'mortgage' && !asset
         ? { name: 'Home', kind: 'home' as const, originalValue: setup.originalHomeValue, valueTrend: 'manual' as const, trendRatePercent: null, acquiredDate: setup.openDate }
         : asset;
-      const m = new MockLoan({ loan, setup, asset: home ? { ...home, values: [] } : null });
+      const m = new MockLoan({ loan, setup, asset: home ? { ...home, actualAccountId: home.actualAccountId ?? null, values: [] } : null });
       loans.push(m);
       return later({ loan, state: m.state() });
     },

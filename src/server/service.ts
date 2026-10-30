@@ -22,6 +22,7 @@ import {
   validateSetup,
   type Asset,
   type AssetKind,
+  type AssetValueSource,
   type InterestMethod,
   type LoanModules,
   type OneOffFee,
@@ -44,7 +45,7 @@ import {
   type SkipMode,
   type StartingPoint,
 } from '../engine/index.js';
-import type { BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
+import type { BudgetAccount, BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
 import { BackupError, exportBackup, restoreBackup, type Backup, type RestoreResult } from './backup.js';
 import {
   LOAN_DETAIL_FIELDS,
@@ -60,6 +61,7 @@ import {
   type Store,
   type StoredAdjustment,
 } from './db.js';
+import { assetWithLinkedValue, LinkedAccounts } from './linked.js';
 
 export class HttpError extends Error {
   constructor(
@@ -83,6 +85,8 @@ export interface StateView {
   loan: LoanRecord;
   /** What the loan paid for, if recorded. Equity is measured against it. */
   asset: AssetRecord | null;
+  /** Where the asset's value comes from: values entered here, or a linked Actual account. Null without an asset. */
+  assetValue: AssetValueSource | null;
   setup: LoanSetup | null;
   settings: Settings;
   source: SourceStatus;
@@ -285,16 +289,20 @@ export class LoanService {
     private readonly source: BudgetSource,
     private readonly today: () => ISODate,
     readonly loan: LoanRecord,
+    private readonly linked: LinkedAccounts = new LinkedAccounts(source),
   ) {
     this.store = root.loan(loan.id);
   }
 
   /**
-   * The asset equity is measured against. A mortgage always has a home, so
-   * one without a recorded asset uses the home described by its setup.
+   * The asset equity is measured against, with a linked account's balance
+   * as its newest value. A mortgage always has a home, so one without a
+   * recorded asset uses the home described by its setup.
    */
   private asset(setup: LoanSetup): Asset | null {
-    return this.root.assetForLoan(this.loan.id) ?? (this.loan.type === 'mortgage' ? homeAssetFor(setup) : null);
+    const record = this.root.assetForLoan(this.loan.id);
+    if (record) return assetWithLinkedValue(record, this.linked).asset;
+    return this.loan.type === 'mortgage' ? homeAssetFor(setup) : null;
   }
 
   /** When each matched payment really left the bank, for daily-interest loans. */
@@ -342,9 +350,11 @@ export class LoanService {
 
   state(): StateView {
     const setup = this.store.getSetup();
+    const assetRecord = this.root.assetForLoan(this.loan.id);
     const base = {
       loan: this.root.getLoan(this.loan.id) ?? this.loan,
-      asset: this.root.assetForLoan(this.loan.id),
+      asset: assetRecord,
+      assetValue: assetRecord ? assetWithLinkedValue(assetRecord, this.linked).source : null,
       setup,
       settings: this.store.getSettings(),
       source: this.source.status(),
@@ -429,7 +439,7 @@ export class LoanService {
       if (createHome && this.loan.type === 'mortgage' && !this.root.assetForLoan(this.loan.id)) {
         this.root.createAsset({
           loanId: this.loan.id, name: 'Home', kind: 'home', originalValue: setup.originalHomeValue,
-          valueTrend: 'manual', trendRatePercent: null, acquiredDate: setup.openDate,
+          valueTrend: 'manual', trendRatePercent: null, acquiredDate: setup.openDate, actualAccountId: null,
         });
       }
     });
@@ -791,6 +801,10 @@ export function parseAsset(body: unknown, current?: AssetInput): Omit<AssetInput
   }
   const acquired = merged.acquiredDate ?? null;
   if (acquired !== null && !isValidISODate(acquired)) throw new HttpError(400, 'acquiredDate must be a date like 2026-11-01, or null');
+  const account = merged.actualAccountId ?? null;
+  if (account !== null && !(typeof account === 'string' && account.length > 0 && account.length <= 200)) {
+    throw new HttpError(400, 'actualAccountId must be an Actual account id, or null');
+  }
   return {
     name,
     kind: merged.kind as AssetKind,
@@ -798,6 +812,7 @@ export function parseAsset(body: unknown, current?: AssetInput): Omit<AssetInput
     valueTrend: trend,
     trendRatePercent: trend === 'manual' ? null : (rate as number | null),
     acquiredDate: acquired as ISODate | null,
+    actualAccountId: account as string | null,
   };
 }
 
@@ -806,11 +821,35 @@ export function parseAsset(body: unknown, current?: AssetInput): Omit<AssetInput
  * the read-only summaries. Per-loan work is done by `LoanService`.
  */
 export class TrackerService {
+  /** Balances of linked Actual accounts, shared by every loan. */
+  private readonly linked: LinkedAccounts;
+
   constructor(
     private readonly store: Store,
     private readonly source: BudgetSource,
     private readonly today: () => ISODate,
-  ) {}
+  ) {
+    this.linked = new LinkedAccounts(source);
+  }
+
+  private service(loan: LoanRecord): LoanService {
+    return new LoanService(this.store, this.source, this.today, loan, this.linked);
+  }
+
+  /**
+   * Read the balances of every Actual account linked to an asset. Call it
+   * before reading state or summaries; with no links it asks Actual nothing,
+   * and it never throws (a failure falls back to the values entered here).
+   */
+  async refreshLinked(): Promise<void> {
+    const ids = this.store.listAssets().flatMap((a) => (a.actualAccountId ? [a.actualAccountId] : []));
+    await this.linked.refresh(ids, this.today());
+  }
+
+  /** The budget's accounts, to pick one to link. */
+  accounts(): Promise<BudgetAccount[]> {
+    return this.source.getAccounts();
+  }
 
   sourceStatus(): SourceStatus {
     return this.source.status();
@@ -831,12 +870,12 @@ export class TrackerService {
   loan(id: number): LoanService {
     const loan = this.store.getLoan(id);
     if (!loan) throw new HttpError(404, `There is no loan ${id}`);
-    return new LoanService(this.store, this.source, this.today, loan);
+    return this.service(loan);
   }
 
   loans(): LoanListItem[] {
     return this.store.listLoans().map((loan) => {
-      const svc = new LoanService(this.store, this.source, this.today, loan);
+      const svc = this.service(loan);
       const asset = this.store.assetForLoan(loan.id);
       const item: LoanListItem = {
         loan,
@@ -880,7 +919,7 @@ export class TrackerService {
       const created = this.store.createLoan({ nickname, type });
       if (asset) this.store.createAsset({ ...asset, loanId: created.id });
       if (setup) {
-        const svc = new LoanService(this.store, this.source, this.today, created);
+        const svc = this.service(created);
         // Builds the schedule first, so a setup that can't be scheduled rolls everything back.
         svc.saveSetup(setup, { createHome: b.asset !== null });
       }
@@ -1014,7 +1053,7 @@ export class TrackerService {
       .listLoans()
       .filter((l) => !l.archived)
       .flatMap((loan) => {
-        const summary = new LoanService(this.store, this.source, this.today, loan).summary();
+        const summary = this.service(loan).summary();
         return summary ? [{ loan, summary }] : [];
       });
   }

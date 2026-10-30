@@ -1,5 +1,5 @@
 import type { ISODate, LoanSetup } from '../engine/index.js';
-import type { BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
+import { SourceUnavailable, type BudgetAccount, type BudgetSource, type BudgetTransaction, type CategoryGroup, type SourceStatus } from './actual.js';
 
 /** Made-up sample loan used across the backend tests. Not real numbers. */
 export const SAMPLE_SETUP: LoanSetup = {
@@ -57,6 +57,12 @@ export const STUDENT_CATEGORY = 'cat-student';
 /** In-memory stand-in for Actual. */
 export class FakeSource implements BudgetSource {
   transactions: (BudgetTransaction & { category: string })[] = [];
+  /** Accounts and their transactions (date, cents), for balances. */
+  accounts: (BudgetAccount & { entries: { date: ISODate; amount: number }[] })[] = [];
+  /** Set to make every account read fail as if Actual were down. */
+  down = false;
+  /** How many times balances were read, to check nothing is read without a link. */
+  balanceReads = 0;
 
   status(): SourceStatus {
     return { connected: true, lastSync: '2025-01-01T00:00:00.000Z', error: null };
@@ -81,6 +87,23 @@ export class FakeSource implements BudgetSource {
     return this.transactions
       .filter((t) => t.category === categoryId && t.date >= start && t.date <= end)
       .map(({ category: _c, ...t }) => t);
+  }
+
+  async getAccounts(): Promise<BudgetAccount[]> {
+    if (this.down) throw new SourceUnavailable('Could not load the budget from Actual: network-failure');
+    return this.accounts.map(({ entries: _e, ...a }) => a);
+  }
+
+  async getAccountBalance(accountId: string, asOf: ISODate) {
+    if (this.down) throw new SourceUnavailable('Could not load the budget from Actual: network-failure');
+    this.balanceReads++;
+    const account = this.accounts.find((a) => a.id === accountId);
+    return (account?.entries ?? []).filter((e) => e.date <= asOf).reduce((sum, e) => sum + e.amount, 0);
+  }
+
+  /** An account whose balance is the sum of `entries`. */
+  addAccount(id: string, name: string, entries: { date: ISODate; amount: number }[], offBudget = true) {
+    this.accounts.push({ id, name, offBudget, closed: false, entries });
   }
 
   add(id: string, date: ISODate, amount: number, category = MORTGAGE_CATEGORY) {

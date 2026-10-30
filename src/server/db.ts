@@ -80,6 +80,12 @@ export interface AssetRecord {
   valueTrend: ValueTrend;
   trendRatePercent: number | null;
   acquiredDate: ISODate | null;
+  /**
+   * Use this Actual account's balance as the value, read live (an
+   * off-budget account kept up to date some other way). The values
+   * entered here are the fallback. Null = values entered here only.
+   */
+  actualAccountId: string | null;
   /** Oldest first. */
   values: StoredAssetValue[];
 }
@@ -220,10 +226,10 @@ export class Store {
   createAsset(a: AssetInput): AssetRecord {
     const result = this.db
       .prepare(
-        `INSERT INTO assets (loan_id, name, kind, original_value_cents, value_trend, trend_rate_percent, acquired_date, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO assets (loan_id, name, kind, original_value_cents, value_trend, trend_rate_percent, acquired_date, actual_account_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(a.loanId, a.name, a.kind, a.originalValue, a.valueTrend, a.trendRatePercent, a.acquiredDate, new Date().toISOString());
+      .run(a.loanId, a.name, a.kind, a.originalValue, a.valueTrend, a.trendRatePercent, a.acquiredDate, a.actualAccountId, new Date().toISOString());
     return this.getAsset(Number(result.lastInsertRowid))!;
   }
 
@@ -231,9 +237,9 @@ export class Store {
     const changes = this.db
       .prepare(
         `UPDATE assets SET loan_id = ?, name = ?, kind = ?, original_value_cents = ?, value_trend = ?,
-                trend_rate_percent = ?, acquired_date = ? WHERE id = ?`,
+                trend_rate_percent = ?, acquired_date = ?, actual_account_id = ? WHERE id = ?`,
       )
-      .run(a.loanId, a.name, a.kind, a.originalValue, a.valueTrend, a.trendRatePercent, a.acquiredDate, id).changes;
+      .run(a.loanId, a.name, a.kind, a.originalValue, a.valueTrend, a.trendRatePercent, a.acquiredDate, a.actualAccountId, id).changes;
     return changes ? this.getAsset(id) : null;
   }
 
@@ -481,6 +487,7 @@ interface AssetRow {
   value_trend: ValueTrend;
   trend_rate_percent: number | null;
   acquired_date: string | null;
+  actual_account_id: string | null;
 }
 
 const fromAssetRow = (r: AssetRow, values: StoredAssetValue[]): AssetRecord => ({
@@ -492,6 +499,7 @@ const fromAssetRow = (r: AssetRow, values: StoredAssetValue[]): AssetRecord => (
   valueTrend: r.value_trend,
   trendRatePercent: r.trend_rate_percent,
   acquiredDate: r.acquired_date,
+  actualAccountId: r.actual_account_id,
   values,
 });
 

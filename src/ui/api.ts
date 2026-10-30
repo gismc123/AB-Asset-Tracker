@@ -1,11 +1,11 @@
 import type { Cents, EscrowKind, ISODate, LoanSetup, SkipMode } from '../engine/index.js';
-import type { CategoryGroup } from '../server/actual.js';
+import type { BudgetAccount, CategoryGroup } from '../server/actual.js';
 import type { Backup, RestoreResult } from '../server/backup.js';
 import type { AssetInput, AssetRecord, LoanDetails, LoanRecord, LoanType } from '../server/db.js';
 import type { Candidate, LoanListItem, MatchResult, StateView } from '../server/service.js';
 import type { Resolution } from '../engine/index.js';
 
-export type { StateView, Candidate, MatchResult, CategoryGroup, LoanDetails, LoanListItem, LoanRecord, LoanType, AssetRecord, Backup, RestoreResult };
+export type { StateView, Candidate, MatchResult, CategoryGroup, BudgetAccount, LoanDetails, LoanListItem, LoanRecord, LoanType, AssetRecord, Backup, RestoreResult };
 
 export class ApiError extends Error {
   constructor(
@@ -82,6 +82,10 @@ export interface LoanClient {
   clearPmiRemoval(): Promise<StateView>;
   /** Create the loan's asset, or update the one it has. */
   saveAsset(asset: AssetFields): Promise<StateView>;
+  /** The budget's accounts, to link one. */
+  accounts(): Promise<BudgetAccount[]>;
+  /** Use an Actual account's balance as the asset's value (null: the values entered here). */
+  setAssetAccount(assetId: number, accountId: string | null): Promise<StateView>;
   addAssetValue(assetId: number, value: { date: ISODate; value: Cents; source: string }): Promise<StateView>;
   deleteAssetValue(assetId: number, valueId: number): Promise<StateView>;
   addEscrowEntry(entry: { date: ISODate; kind: EscrowKind; amount: Cents; note: string }): Promise<StateView>;
@@ -89,7 +93,8 @@ export interface LoanClient {
   saveDetails(details: LoanDetails): Promise<StateView>;
 }
 
-export type AssetFields = Omit<AssetInput, 'loanId'>;
+/** An asset's own fields. Leaving out `actualAccountId` keeps the link it has. */
+export type AssetFields = Omit<AssetInput, 'loanId' | 'actualAccountId'> & { actualAccountId?: string | null };
 
 export interface NewLoan {
   nickname: string;
@@ -155,6 +160,11 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
         const current = (await state()).asset;
         if (current) await call('PATCH', `/assets/${current.id}`, asset);
         else await call('POST', '/assets', { ...asset, loanId });
+        return state();
+      },
+      accounts: () => call('GET', '/accounts'),
+      async setAssetAccount(assetId, actualAccountId) {
+        await call('PATCH', `/assets/${assetId}`, { actualAccountId });
         return state();
       },
       async addAssetValue(assetId, v) {

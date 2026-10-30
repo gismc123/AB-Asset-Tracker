@@ -12,7 +12,18 @@ export interface BudgetSource {
   getCategories(): Promise<CategoryGroup[]>;
   /** Transactions (and split children) in one category between two dates. */
   getTransactionsInCategory(categoryId: string, start: ISODate, end: ISODate): Promise<BudgetTransaction[]>;
+  /** Every account in the budget, open and closed. */
+  getAccounts(): Promise<BudgetAccount[]>;
+  /** An account's balance in cents (Actual's sign: assets positive, debts negative), counting transactions dated up to `asOf`. */
+  getAccountBalance(accountId: string, asOf: ISODate): Promise<Cents>;
   status(): SourceStatus;
+}
+
+export interface BudgetAccount {
+  id: string;
+  name: string;
+  offBudget: boolean;
+  closed: boolean;
 }
 
 export interface CategoryGroup {
@@ -59,6 +70,9 @@ interface RawTxn {
   tombstone?: boolean;
   subtransactions?: RawTxn[];
 }
+
+/** Start of every account's history, for balances. */
+const EARLIEST = '1900-01-01';
 
 /** Only re-sync with the server when data is older than this. */
 const SYNC_INTERVAL_MS = 30_000;
@@ -174,6 +188,25 @@ export class ActualApiSource implements BudgetSource {
         }
       }
       return out.sort((a, b) => a.date.localeCompare(b.date));
+    });
+  }
+
+  getAccounts(): Promise<BudgetAccount[]> {
+    return this.serialized(async () => {
+      const api = await this.connected();
+      const accounts = (await api.getAccounts()) as unknown as { id: string; name: string; offbudget?: boolean; closed?: boolean }[];
+      return accounts.map((a) => ({ id: a.id, name: a.name, offBudget: !!a.offbudget, closed: !!a.closed }));
+    });
+  }
+
+  getAccountBalance(accountId: string, asOf: ISODate): Promise<Cents> {
+    return this.serialized(async () => {
+      const api = await this.connected();
+      // Summed from the same read the reconcile screen uses, rather than
+      // getAccountBalance, which Actual runs inside its change-tracking
+      // wrapper. A split's parent carries the total of its lines.
+      const txns = (await api.getTransactions(accountId, EARLIEST, asOf)) as unknown as RawTxn[];
+      return txns.reduce((sum, t) => (t.tombstone ? sum : sum + t.amount), 0);
     });
   }
 

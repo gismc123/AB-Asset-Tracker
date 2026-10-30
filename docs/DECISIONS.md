@@ -106,3 +106,13 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **Student loans are their own type, `student`, with no asset, PMI or escrow, like a personal loan.** A type of its own lets the picker, the sidebar icon and the summary endpoint say what the loan is. Dashboards may now see `type: "student"`; no existing value changed.
 - **Migration 3 rebuilds the `loans` table to widen its type check, keeping every id and the AUTOINCREMENT counter.** SQLite can't change a CHECK in place; keeping the counter means a deleted loan's id is never handed to a new loan, so a dashboard's `?loan=<id>` can't silently point somewhere else.
 - **A new student loan defaults to 120 monthly payments and monthly interest.** Ten years is the common standard plan; monthly interest stays the default for every type (the field's hint says many student loans use daily interest).
+
+### Asset value from an Actual account
+
+- **The link is per asset (`assets.actual_account_id`, migration 4) and empty for every existing asset.** Nothing changes until someone picks an account.
+- **The balance is summed from the account's transactions up to today, with the same `getTransactions` read the reconcile screen uses.** Actual's own `getAccountBalance` runs inside its change-tracking wrapper; summing plain reads keeps every call to Actual a read. Future-dated transactions are left out, as Actual's own balance does.
+- **The account's balance becomes the newest value, dated the day it was read; the values entered in the tracker stay as the fallback.** Equity, the chart, the projection and the summary endpoint all work from "the newest value" already, so nothing else had to learn about accounts, and unlinking loses nothing.
+- **A negative balance is never used as a value; the entered values are used, with a note.** An asset account in Actual has a positive balance; a negative one means a debt account was picked by mistake.
+- **When Actual can't be read, a balance read earlier is kept and flagged; with none, the entered values are used.** A dashboard or the Loans screen keeps working while Actual restarts, and says why the number may be old.
+- **Balances are read only for linked accounts, at most every 30 seconds, and only on the loan list, loan state and summary requests.** A tracker with no links never asks Actual for a balance, so existing installs see no new traffic.
+- **The summary endpoint's `valueSource` says `Actual account`, without the account's name.** The name is the user's own label and the endpoint never carried account details.

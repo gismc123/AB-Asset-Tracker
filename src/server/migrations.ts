@@ -279,6 +279,13 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 4,
+    description: "Asset value from an Actual account's balance: assets.actual_account_id",
+    up(db) {
+      if (!columns(db, 'assets').includes('actual_account_id')) db.exec(`ALTER TABLE assets ADD COLUMN actual_account_id TEXT`);
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)!.version;
