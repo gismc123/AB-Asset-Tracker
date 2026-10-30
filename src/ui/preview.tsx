@@ -6,7 +6,7 @@
  *   ?theme=dark   Actual's dark theme
  *   ?empty        first run, no loans yet
  *   ?privacy      privacy mode
- *   ?loan=2       open the car loan (1 mortgage, 2 car, 3 personal)
+ *   ?loan=2       open the car loan (1 mortgage, 2 car, 3 personal, 4 student)
  */
 import {
   addDays,
@@ -96,6 +96,20 @@ const PERSONAL: LoanSetup = {
   yearlyFee: { basis: 'balance', percent: 0.5, collect: 'separately' },
 };
 
+const STUDENT: LoanSetup = {
+  ...CAR,
+  originalAmount: 2_700_000,
+  annualRatePercent: 5.5,
+  termYears: 10,
+  termMonths: 120,
+  openDate: '2024-11-15',
+  firstPaymentDate: '2024-12-15',
+  paymentDay: 15,
+  interestMethod: 'daily',
+  downPayment: null,
+  fees: [],
+};
+
 interface Seed {
   loan: LoanRecord;
   setup: LoanSetup;
@@ -167,6 +181,19 @@ const SEEDS: Seed[] = [
     details: { fields: { servicerName: 'Sample Credit Union' }, custom: [] },
   },
 ];
+
+SEEDS.push({
+  loan: { id: 4, nickname: 'Student loan', type: 'student', createdAt: '', archived: false },
+  setup: STUDENT,
+  asset: null,
+  categoryId: 'cat-loans',
+  paid: 10,
+  extraOn: null,
+  extras: [['2025-06-02', 50_000]],
+  spareExtra: null,
+  details: { fields: { servicerName: 'Sample Student Loan Servicing' }, custom: [] },
+  escrow: [],
+});
 
 const CATEGORIES: CategoryGroup[] = [
   { id: 'g1', name: 'Housing', categories: [{ id: 'cat-mortgage', name: 'Mortgage' }, { id: 'cat-util', name: 'Utilities' }] },
