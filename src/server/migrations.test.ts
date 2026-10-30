@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { databaseFile, DB_FILE, LEGACY_DB_FILE, Store } from './db.js';
 import { currentVersion, LATEST_VERSION, migrate } from './migrations.js';
+import { summaryForDisplay } from './app.js';
 import { TrackerService } from './service.js';
 import { FakeSource } from './testing.js';
 
@@ -148,5 +149,73 @@ describe('migrating a single-loan database', () => {
     expect(check.prepare(`SELECT COUNT(*) AS n FROM loan`).get()).toEqual({ n: 1 });
     expect(check.prepare(`SELECT COUNT(*) AS n FROM months`).get()).toEqual({ n: 5 });
     check.close();
+  });
+});
+
+/**
+ * test/fixtures/v0.1.0.* is a database written by v0.1.0 (schema version 2)
+ * after a realistic run on four made-up loans: a mortgage with every kind of
+ * reconciliation answer, a skip with a catch-up plan, escrow and a value; a
+ * daily-interest car loan with fees and a depreciating vehicle; a personal
+ * loan with a yearly fee and two kinds of skip; and an archived mortgage
+ * tracked from partway through with PMI kept until removed. Next to it is
+ * exactly what v0.1.0 returned for each loan, the loan list and the summary
+ * endpoint. Every later release must open that database and return the same
+ * numbers to the cent. New fields may be added alongside.
+ */
+describe('upgrading a v0.1.0 database', () => {
+  const v010 = golden('v0.1.0.golden') as {
+    today: string;
+    loans: unknown[];
+    states: Record<string, Record<string, unknown>>;
+    summaries: Record<string, unknown>;
+    endpoint: unknown[];
+  };
+
+  function v010File(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tracker-v010-'));
+    dirs.push(dir);
+    const file = path.join(dir, DB_FILE);
+    const db = new Database(file);
+    db.exec(fs.readFileSync(path.join(FIXTURES, 'v0.1.0.sql'), 'utf8'));
+    db.close();
+    return file;
+  }
+
+  function v010Source() {
+    const source = new FakeSource();
+    source.transactions = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'v0.1.0.txns.json'), 'utf8'));
+    return source;
+  }
+
+  it('reproduces every loan, match, total and summary to the cent', () => {
+    const file = v010File();
+    const store = new Store(file);
+    const service = new TrackerService(store, v010Source(), () => v010.today);
+    expect(Object.keys(v010.states)).toHaveLength(4);
+    for (const [id, state] of Object.entries(v010.states)) {
+      const loan = service.loan(Number(id));
+      expect(loan.state()).toMatchObject(state);
+      expect(loan.summary()).toMatchObject(v010.summaries[id]!);
+    }
+    expect(service.loans()).toMatchObject(v010.loans);
+    expect(service.summaries().map(({ loan, summary }) => summaryForDisplay(loan, summary))).toMatchObject(v010.endpoint);
+    store.close();
+  });
+
+  it('leaves every v0.1.0 row as it was', () => {
+    const file = v010File();
+    const old = new Database(file, { readonly: true });
+    const tables = (old.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_version'`).all() as { name: string }[]).map((t) => t.name);
+    const before = Object.fromEntries(tables.map((t) => [t, old.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()]));
+    old.close();
+
+    const store = new Store(file);
+    for (const t of tables) {
+      const after = store.db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all() as Record<string, unknown>[];
+      // New columns may be added with a default; every old column keeps its value.
+      expect(after, t).toMatchObject(before[t] as Record<string, unknown>[]);
+    }
+    store.close();
   });
 });
