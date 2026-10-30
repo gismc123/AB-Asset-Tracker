@@ -54,6 +54,14 @@ With `?loan=<id>`, you get that one loan. Example for the made-up car loan:
 ```
 
 - Money is in dollars, dates are `YYYY-MM-DD`.
+- `type` is `mortgage`, `auto`, `personal` or `student`.
+- `balance` is after the last reconciled payment, less any
+  [extra payment](../README.md#extra-payments) of its own already made since.
+- When the asset's value comes from a linked Actual account, `valueSource`
+  is `"Actual account"` and `valueAsOf` is the day its balance was read.
+  The account's name isn't included. If Actual can't be read, the last
+  balance read (or the latest value entered in the tracker) is used, so the
+  endpoint keeps answering.
 - `paymentNumber` is the last *reconciled* payment. `balance` is after that
   payment; `scheduledBalance` is what the schedule expects by today.
   `nextPayment.daysUntil` is negative when that payment's due date has

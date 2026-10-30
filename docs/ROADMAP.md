@@ -1,9 +1,12 @@
 # Roadmap
 
-What's planned for AB Asset Tracker after v0.1.0, roughly in order. Most of
+What's planned for AB Asset Tracker after v0.2.0, roughly in order. Most of
 it comes from early feedback by people who track loans in Actual. Today's
 gaps are listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md); this page
 says which ones will be closed and how.
+
+v0.2.0 shipped the what-if calculator and extra payments on their own
+date, among others; see [RELEASE_NOTES_v0.2.0.md](../RELEASE_NOTES_v0.2.0.md).
 
 Nothing here has a date. Order can change with feedback, and contributions
 are welcome on any item: open an issue first for the larger ones (see
@@ -24,21 +27,6 @@ separators even though the math is right.
 - Follow Actual's own number format setting where the tracker can read it.
 - The summary endpoint keeps returning plain numbers; it gains a `currency`
   field so dashboards can format them.
-
-### What-if calculator
-
-"When would I be done if I paid $200 more a month?" is one of the most asked
-questions, and today the only way to answer it is to change the real
-schedule.
-
-- On the Overview, try a higher monthly payment, a one-time lump sum on a
-  chosen date, or both.
-- See the new payoff date, months saved and interest saved next to the
-  current plan, with both balance curves on one chart.
-- Nothing is saved unless you choose to turn the extra into a standing
-  extra principal.
-- The engine already recalculates from any point, so this is mostly a new
-  screen on top of it.
 
 ### Several loans on one asset
 
@@ -69,18 +57,6 @@ already knows those numbers but, being read-only, can't enter them.
   [Needs discussion](#needs-discussion).
 
 ## Later
-
-### Extra payments on their own date
-
-An extra principal payment made between two regular payments has to be
-recorded with a regular month. On a daily-interest loan that charges a few
-days more interest than the lender does.
-
-- Record an extra payment with its own date, matched to its own bank
-  transaction.
-- Daily-interest loans charge interest up to that date on the old balance
-  and after it on the new one. Monthly-interest loans apply it with the next
-  payment, as lenders do.
 
 ### Rate changes
 

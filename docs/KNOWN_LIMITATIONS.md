@@ -81,9 +81,10 @@ is planned, and in what order, is in the [roadmap](ROADMAP.md).
   port instead.
 - **The sidebar item depends on Actual's page markup.** A big Actual update
   can hide it until the add-on is updated; Actual keeps working either way.
-- **One bank transaction per payment.** A payment made in two transactions
-  can't be matched to one month, unless it is one split transaction in
-  Actual.
+- **One bank transaction per regular payment.** A regular payment made in
+  two transactions can't be matched to one month, unless it is one split
+  transaction in Actual. Extra principal paid on its own is separate: a
+  month can have any number of those.
 - **Dollar formatting.** Amounts are always shown with a `$` sign and US
   number formatting (`1,234.56`), whatever currency your budget is in. The
   math itself works for any currency with two decimals.
