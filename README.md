@@ -181,7 +181,8 @@ Behind a Cloudflare Tunnel or your own HTTPS proxy, open your public name
 instead (for example `https://budget.example.com`), once the tunnel points
 at port 5007.
 
-Log in to Actual as usual. **Loans** appears in the sidebar.
+Log in to Actual as usual. **Loans** appears in the sidebar (for setup B,
+once you've finished step 6).
 
 ### Step 6 (setup B only): Create your budget, then connect the tracker
 
@@ -194,6 +195,10 @@ Log in to Actual as usual. **Loans** appears in the sidebar.
    ACTUAL_SYNC_ID=the-sync-id-you-copied
    ```
 4. Run `docker compose up -d` again.
+
+Until then, `asset-tracker-backend` keeps restarting and its log says
+`Missing required setting(s): ACTUAL_PASSWORD, ACTUAL_SYNC_ID`. That's
+expected; it starts properly once both are filled in.
 
 ### Step 7: Check it worked
 

@@ -273,7 +273,9 @@ function AssetValues({ state, client, onState, kind }: Props & { kind: AssetKind
       {asset && <ValueSource state={state} client={client} onState={onState} asset={asset} />}
       {values.length === 0 ? (
         <p className="mt-kpi-note" style={{ marginTop: 0 }}>
-          Equity uses the original value until you add a newer one. The newest value is used.
+          {state.assetValue?.active === 'account'
+            ? "Values you enter here are used only when the account can't be read."
+            : 'Equity uses the original value until you add a newer one. The newest value is used.'}
         </p>
       ) : (
         <table className="mt-data" style={{ marginBottom: 12 }}>
