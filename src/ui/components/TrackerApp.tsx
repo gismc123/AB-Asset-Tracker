@@ -5,6 +5,7 @@ import { date } from '../format.js';
 import { valueScreenLabel } from '../loanTypes.js';
 import { AddLoanWizard } from './AddLoanWizard.js';
 import { Amt } from './Amt.js';
+import { BalanceCheckNote, BalanceCheckSettings } from './BalanceCheckView.js';
 import { BackupView } from './BackupView.js';
 import { BankTableView } from './BankTableView.js';
 import { BalanceChart } from './BalanceChart.js';
@@ -335,6 +336,12 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
         <>
           <SetupForm type={state.loan.type} initial={state.setup} hasReconciled={!!s?.rows.some((r) => r.status === 'paid')} onSave={saveSetup} />
           <div className="mt-gap" />
+          {state.setup && (
+            <>
+              <BalanceCheckSettings state={state} client={client} onState={setState} />
+              <div className="mt-gap" />
+            </>
+          )}
           <LoanSettings loan={state.loan} onRename={onRename} onArchive={onArchive} onDelete={onDelete} />
         </>
       )}
@@ -349,6 +356,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
                 : 'Set up a catch-up plan from the missed month in Reconcile.'}
             </div>
           )}
+          {state.balanceCheck && <BalanceCheckNote check={state.balanceCheck} />}
           <SummaryCards summary={state.summary} />
           <div className="mt-gap" />
           <div className="mt-grid mt-two">

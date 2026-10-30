@@ -1,5 +1,15 @@
 import { modulesOf } from './amortize.js';
-import { currentValue, hasProjection, homeAssetFor, latestValue, projectedValue, type Asset, type AssetKind, type AssetValue } from './assets.js';
+import {
+  currentValue,
+  hasProjection,
+  homeAssetFor,
+  latestValue,
+  projectedValue,
+  type AccountReading,
+  type Asset,
+  type AssetKind,
+  type AssetValue,
+} from './assets.js';
 import { daysBetween } from './dates.js';
 import { dailyInterest } from './money.js';
 import type { Cents, ISODate, LoanSetup, PmiRemovalRule, Schedule, ScheduleRow } from './types.js';
@@ -81,6 +91,32 @@ export interface LoanSummary {
     /** `untilRemoved`: no drop is planned; PMI stays until its removal is recorded. */
     removalRule: PmiRemovalRule;
   };
+}
+
+/**
+ * The tracker's balance next to the balance of an Actual account that
+ * tracks the same loan. Loan accounts in Actual show what's owed as a
+ * negative balance, so the amounts are compared without their sign.
+ */
+export interface BalanceCheck {
+  account: AccountReading;
+  /** The tracker's principal balance today. */
+  tracker: Cents;
+  /** What Actual's account says is owed, or null when it couldn't be read. */
+  actual: Cents | null;
+  /** tracker - actual. */
+  difference: Cents | null;
+  matches: boolean | null;
+  /** Why it couldn't be compared, or why the account's balance may be out of date. */
+  problem: string | null;
+}
+
+export function checkBalance(tracker: Cents, account: AccountReading): BalanceCheck {
+  if (account.balance === null) {
+    return { account, tracker, actual: null, difference: null, matches: null, problem: account.error ?? 'Not read from Actual yet' };
+  }
+  const actual = Math.abs(account.balance);
+  return { account, tracker, actual, difference: tracker - actual, matches: tracker === actual, problem: account.error };
 }
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 10_000) / 100 : 0);

@@ -84,6 +84,11 @@ export interface StoredExtraPayment {
 export interface Settings {
   /** The Actual category this loan's payments are booked to. */
   categoryId: string | null;
+  /**
+   * An Actual account that tracks this loan's balance (usually off budget),
+   * to compare with the tracker's. Read only; null = no cross-check.
+   */
+  balanceAccountId: string | null;
 }
 
 export interface StoredAssetValue extends AssetValue {
@@ -237,6 +242,17 @@ export class Store {
     return row ? fromAssetRow(row, this.listAssetValues(row.id)) : null;
   }
 
+  /** Every Actual account linked to an asset or to a loan's balance cross-check. */
+  linkedAccountIds(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT actual_account_id AS id FROM assets WHERE actual_account_id IS NOT NULL
+         UNION SELECT balance_account_id FROM loan_settings WHERE balance_account_id IS NOT NULL`,
+      )
+      .all() as { id: string }[];
+    return rows.map((r) => r.id);
+  }
+
   assetForLoan(loanId: number): AssetRecord | null {
     const row = this.db.prepare(`SELECT * FROM assets WHERE loan_id = ?`).get(loanId) as AssetRow | undefined;
     return row ? fromAssetRow(row, this.listAssetValues(row.id)) : null;
@@ -310,19 +326,20 @@ export class LoanStore {
   // --- settings -------------------------------------------------------------
 
   getSettings(): Settings {
-    const row = this.db.prepare(`SELECT category_id FROM loan_settings WHERE loan_id = ?`).get(this.loanId) as
-      | { category_id: string | null }
+    const row = this.db.prepare(`SELECT category_id, balance_account_id FROM loan_settings WHERE loan_id = ?`).get(this.loanId) as
+      | { category_id: string | null; balance_account_id: string | null }
       | undefined;
-    return { categoryId: row?.category_id ?? null };
+    return { categoryId: row?.category_id ?? null, balanceAccountId: row?.balance_account_id ?? null };
   }
 
-  saveSettings(settings: Settings) {
+  saveSettings(settings: Pick<Settings, 'categoryId'> & Partial<Settings>) {
+    const balanceAccountId = settings.balanceAccountId === undefined ? this.getSettings().balanceAccountId : settings.balanceAccountId;
     this.db
       .prepare(
-        `INSERT INTO loan_settings (loan_id, category_id) VALUES (?, ?)
-         ON CONFLICT (loan_id) DO UPDATE SET category_id = excluded.category_id`,
+        `INSERT INTO loan_settings (loan_id, category_id, balance_account_id) VALUES (?, ?, ?)
+         ON CONFLICT (loan_id) DO UPDATE SET category_id = excluded.category_id, balance_account_id = excluded.balance_account_id`,
       )
-      .run(this.loanId, settings.categoryId);
+      .run(this.loanId, settings.categoryId, balanceAccountId);
   }
 
   // --- adjustments ------------------------------------------------------------

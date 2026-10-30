@@ -325,6 +325,13 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    description: "Balance cross-check with an Actual loan account: loan_settings.balance_account_id",
+    up(db) {
+      if (!columns(db, 'loan_settings').includes('balance_account_id')) db.exec(`ALTER TABLE loan_settings ADD COLUMN balance_account_id TEXT`);
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)!.version;

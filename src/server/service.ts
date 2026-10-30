@@ -2,6 +2,7 @@ import {
   addDays,
   addYears,
   analyzeEquity,
+  checkBalance,
   dueDateFor,
   effectiveRate,
   compareToSchedule,
@@ -36,6 +37,7 @@ import {
   type YearlyFee,
   type Cents,
   type EquityAnalysis,
+  type BalanceCheck,
   type BankRow,
   type EffectiveRate,
   type EscrowReport,
@@ -100,6 +102,8 @@ export interface StateView {
   asset: AssetRecord | null;
   /** Where the asset's value comes from: values entered here, or a linked Actual account. Null without an asset. */
   assetValue: AssetValueSource | null;
+  /** The tracker's balance next to a linked Actual loan account's. Null when no account is linked or the loan isn't set up. */
+  balanceCheck: BalanceCheck | null;
   setup: LoanSetup | null;
   settings: Settings;
   source: SourceStatus;
@@ -451,7 +455,7 @@ export class LoanService {
       bankSchedule: this.store.listBankRows(),
       details: this.store.getDetails(),
     };
-    if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
+    if (!setup) return { ...base, balanceCheck: null, schedule: null, summary: null, analysis: null };
 
     const schedule = this.build(setup);
     const months = new Map(this.store.listMonths().map((m) => [m.payment, m]));
@@ -459,6 +463,8 @@ export class LoanService {
     const paid = this.paidSet();
     const asset = this.asset(setup);
     const paidOn = new Map([...months.values()].filter((m) => m.status === 'paid').map((m) => [m.payment, m.transactionDate]));
+    const summary = summarize(setup, schedule, paid, today, asset);
+    const balanceAccount = base.settings.balanceAccountId;
     const rows: MonthView[] = schedule.rows.map((r) => {
       const m = months.get(r.payment);
       return {
@@ -486,7 +492,8 @@ export class LoanService {
         rows,
         currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null,
       },
-      summary: summarize(setup, schedule, paid, today, asset),
+      summary,
+      balanceCheck: balanceAccount ? checkBalance(summary.balance, this.linked.get(balanceAccount)) : null,
       analysis: {
         equity: asset ? analyzeEquity(setup, schedule, paid, today, asset) : null,
         periods: {
@@ -541,10 +548,22 @@ export class LoanService {
     return this.state();
   }
 
+  /**
+   * `{ categoryId, balanceAccountId? }`. A missing `categoryId` clears it, as
+   * before; `balanceAccountId` is only changed when it's given.
+   */
   saveSettings(body: unknown) {
     const b = (body ?? {}) as Record<string, unknown>;
     const categoryId = typeof b.categoryId === 'string' && b.categoryId ? b.categoryId : null;
-    this.store.saveSettings({ ...this.store.getSettings(), categoryId });
+    const settings: Pick<Settings, 'categoryId'> & Partial<Settings> = { categoryId };
+    if (b.balanceAccountId !== undefined) {
+      const id = b.balanceAccountId;
+      if (id !== null && !(typeof id === 'string' && id.length > 0 && id.length <= 200)) {
+        throw new HttpError(400, 'balanceAccountId must be an Actual account id, or null');
+      }
+      settings.balanceAccountId = id as string | null;
+    }
+    this.store.saveSettings(settings);
     return this.store.getSettings();
   }
 
@@ -1129,13 +1148,12 @@ export class TrackerService {
   }
 
   /**
-   * Read the balances of every Actual account linked to an asset. Call it
+   * Read the balances of every Actual account linked to an asset or a loan's cross-check. Call it
    * before reading state or summaries; with no links it asks Actual nothing,
    * and it never throws (a failure falls back to the values entered here).
    */
   async refreshLinked(): Promise<void> {
-    const ids = this.store.listAssets().flatMap((a) => (a.actualAccountId ? [a.actualAccountId] : []));
-    await this.linked.refresh(ids, this.today());
+    await this.linked.refresh(this.store.linkedAccountIds(), this.today());
   }
 
   /** The budget's accounts, to pick one to link. */

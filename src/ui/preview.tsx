@@ -19,6 +19,7 @@ import {
   periodBreakouts,
   resolutionToAdjustment,
   standingExtraAt,
+  checkBalance,
   summarize,
   whatIf,
   withAccountValue,
@@ -110,6 +111,8 @@ interface Seed {
   spareExtra: [string, number] | null;
   /** Payments whose interest comes from a made-up lender's table (a few cents off the calculation): [first, last]. */
   bankTable?: [number, number];
+  /** An account in the mock budget that tracks the loan's balance, for the cross-check. */
+  balanceAccountId?: string;
   escrow: EscrowEntry[];
   details: LoanDetails;
 }
@@ -127,6 +130,7 @@ const SEEDS: Seed[] = [
     extraOn: 5,
     extras: [['2025-06-18', 100_000]],
     spareExtra: ['2025-08-08', 50_000],
+    balanceAccountId: 'acct-mortgage',
     escrow: [
       { id: 1, date: '2025-02-14', kind: 'deposit', amount: 164_000, note: 'Initial deposit at closing' },
       { id: 2, date: '2025-06-20', kind: 'homeownersInsurance', amount: 216_000, note: 'Annual premium' },
@@ -175,7 +179,7 @@ const ACCOUNTS: (BudgetAccount & { balance: number })[] = [
   { id: 'acct-checking', name: 'Checking', offBudget: false, closed: false, balance: 412_300 },
   { id: 'acct-home-value', name: 'Home value', offBudget: true, closed: false, balance: 36_900_000 },
   { id: 'acct-car-value', name: 'Hatchback value', offBudget: true, closed: false, balance: 3_190_000 },
-  { id: 'acct-mortgage', name: 'Mortgage balance', offBudget: true, closed: false, balance: -31_741_582 },
+  { id: 'acct-mortgage', name: 'Mortgage balance', offBudget: true, closed: false, balance: -31_782_800 },
 ];
 
 function reading(id: string | null): AccountReading | null {
@@ -203,6 +207,7 @@ class MockLoan {
   setup: LoanSetup | null;
   asset: AssetRecord | null;
   categoryId: string | null;
+  balanceAccountId: string | null = null;
   adjustments: { adj: Adjustment; source: number | null }[] = [];
   months = new Map<number, Month>();
   txns: Candidate[] = [];
@@ -216,6 +221,7 @@ class MockLoan {
     this.setup = seed.setup;
     this.asset = seed.asset ? { ...seed.asset, id: nextId++, loanId: seed.loan.id } : null;
     this.categoryId = 'categoryId' in seed ? seed.categoryId : null;
+    this.balanceAccountId = 'balanceAccountId' in seed ? (seed.balanceAccountId ?? null) : null;
     this.escrow = 'escrow' in seed ? [...seed.escrow] : [];
     this.details = 'details' in seed ? seed.details : { fields: {}, custom: [] };
     if (!('paid' in seed)) return;
@@ -278,11 +284,12 @@ class MockLoan {
   state(): StateView {
     const linked = this.asset ? withAccountValue(this.asset, reading(this.asset.actualAccountId)) : null;
     const base = {
-      loan: this.loan, asset: this.asset, assetValue: linked?.source ?? null, setup: this.setup, settings: { categoryId: this.categoryId },
+      loan: this.loan, asset: this.asset, assetValue: linked?.source ?? null, setup: this.setup,
+      settings: { categoryId: this.categoryId, balanceAccountId: this.balanceAccountId },
       source: { connected: true, lastSync: null, error: null }, today: TODAY, details: this.details, extraPayments: this.extras, bankSchedule: this.bank,
       adjustments: this.adjustments.map((a, i) => ({ id: i + 1, adjustment: a.adj, sourcePayment: a.source, createdAt: '' })),
     };
-    if (!this.setup) return { ...base, schedule: null, summary: null, analysis: null };
+    if (!this.setup) return { ...base, balanceCheck: null, schedule: null, summary: null, analysis: null };
     const s = this.build();
     const rows: MonthView[] = s.rows.map((r) => {
       const m = this.months.get(r.payment);
@@ -298,11 +305,13 @@ class MockLoan {
     const paid = new Set([...this.months].filter(([, m]) => m.status === 'paid').map(([k]) => k));
     const paidOn = new Map([...this.months].filter(([, m]) => m.status === 'paid').map(([k, m]) => [k, m.txn.date]));
     const asset = linked?.asset ?? null;
+    const summary = summarize(this.setup, s, paid, TODAY, asset);
     return {
       ...base,
+      balanceCheck: this.balanceAccountId ? checkBalance(summary.balance, reading(this.balanceAccountId)!) : null,
       schedule: { piPayment: s.piPayment, calculatedPiPayment: s.calculatedPiPayment, totals: s.totals, pmi: s.pmi, rows,
         currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null },
-      summary: summarize(this.setup, s, paid, TODAY, asset),
+      summary,
       analysis: {
         equity: asset ? analyzeEquity(this.setup, s, paid, TODAY, asset) : null,
         periods: { paid: periodBreakouts(s.rows, paidOn, TODAY, 'paid'), scheduled: periodBreakouts(s.rows, paidOn, TODAY, 'scheduled') },
@@ -345,7 +354,12 @@ class MockLoan {
         self.setup = next;
         return state();
       },
-      async saveSettings(id) { self.categoryId = id; return later({ categoryId: id }); },
+      async saveSettings(id) { self.categoryId = id; return later({ categoryId: id, balanceAccountId: self.balanceAccountId }); },
+      async setBalanceAccount(categoryId, accountId) {
+        self.categoryId = categoryId;
+        self.balanceAccountId = accountId;
+        return state();
+      },
       categories: () => later(CATEGORIES),
       async candidates(n) {
         const row = self.build().rows[n - 1]!;

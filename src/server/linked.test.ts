@@ -135,3 +135,55 @@ describe("asset value from an Actual account's balance", () => {
     expect(list.body[0].assetValue).toBe(3_224_950);
   });
 });
+
+describe('balance cross-check with an Actual loan account', () => {
+  function carLoan() {
+    const { loan } = tracker.createLoan({ nickname: 'Hatchback', type: 'auto', setup: AUTO_SETUP, categoryId: CAR_CATEGORY });
+    return tracker.loan(loan.id);
+  }
+
+  it('is off until an account is picked, and reads nothing', async () => {
+    const car = carLoan();
+    await tracker.refreshLinked();
+    expect(source.balanceReads).toBe(0);
+    expect(car.state().balanceCheck).toBeNull();
+    expect(car.state().settings).toEqual({ categoryId: CAR_CATEGORY, balanceAccountId: null });
+  });
+
+  it('says it matches when the account owes what the tracker does, and by how much it differs otherwise', async () => {
+    const car = carLoan();
+    car.saveSettings({ categoryId: CAR_CATEGORY, balanceAccountId: 'acct-loan' });
+    await tracker.refreshLinked();
+    // Nothing paid yet: both owe $30,000.00 (Actual shows it as -30,000.00).
+    expect(car.state().balanceCheck).toMatchObject({ tracker: 3_000_000, actual: 3_000_000, difference: 0, matches: true, problem: null, account: { name: 'Car loan' } });
+
+    // The first payment's principal is recorded in Actual, and a few cents more.
+    const principal = car.state().schedule!.rows[0]!.principal;
+    source.accounts[1]!.entries.push({ date: '2025-04-10', amount: principal + 3 });
+    vi.setSystemTime(Date.now() + 31_000);
+    await tracker.refreshLinked();
+    expect(car.state().balanceCheck).toMatchObject({ tracker: 3_000_000, actual: 3_000_000 - principal - 3, difference: principal + 3, matches: false });
+  });
+
+  it('flags it when Actual is down, and keeps the category setting as it always worked', async () => {
+    const car = carLoan();
+    car.saveSettings({ categoryId: CAR_CATEGORY, balanceAccountId: 'acct-loan' });
+    source.down = true;
+    await tracker.refreshLinked();
+    expect(car.state().balanceCheck).toMatchObject({ actual: null, matches: null, problem: expect.stringMatching(/Actual/) });
+    // Saving only the category keeps the link; an empty body still clears the category, as in v0.1.0.
+    expect(car.saveSettings({ categoryId: 'cat-other' })).toEqual({ categoryId: 'cat-other', balanceAccountId: 'acct-loan' });
+    expect(car.saveSettings({})).toEqual({ categoryId: null, balanceAccountId: 'acct-loan' });
+    expect(car.saveSettings({ categoryId: null, balanceAccountId: null })).toEqual({ categoryId: null, balanceAccountId: null });
+    expect(() => car.saveSettings({ balanceAccountId: 7 })).toThrow(/balanceAccountId/);
+  });
+
+  it('works over HTTP', async () => {
+    carLoan();
+    const app = createApp({ service: tracker, validateToken: async () => true, uiDir: '/nonexistent', summaryToken: undefined });
+    const put = await request(app).put('/asset-tracker-api/loans/1/settings').set('x-actual-token', 't').send({ categoryId: CAR_CATEGORY, balanceAccountId: 'acct-loan' });
+    expect(put.body).toEqual({ categoryId: CAR_CATEGORY, balanceAccountId: 'acct-loan' });
+    const state = await request(app).get('/asset-tracker-api/loans/1/state').set('x-actual-token', 't');
+    expect(state.body.balanceCheck).toMatchObject({ matches: true, actual: 3_000_000 });
+  });
+});

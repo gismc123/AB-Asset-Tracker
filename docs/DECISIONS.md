@@ -176,3 +176,11 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 
 - **The README now opens with what the add-on is, its requirements and its main limits, before installing.** People were installing it for setups it can't serve (a hosted Actual, the desktop app).
 - **The desktop app is called "not supported (untested)", never "works".** It renders its own bundled pages, so the proxy's script tag never reaches it; supporting it would mean changing the desktop app itself, which this add-on doesn't do.
+
+### Balance cross-check
+
+- **One optional Actual account per loan (`loan_settings.balance_account_id`, migration 7), empty for every existing loan.** Off until someone picks one; nothing else reads it.
+- **The amounts are compared without their sign.** Actual shows a loan account's balance as a negative number (what's owed); the tracker shows what's owed as a positive one.
+- **The tracker's principal balance today is compared, not what's owed with deferred or past-due amounts.** A loan account in Actual normally follows principal, split out of each payment.
+- **A difference is shown with the likeliest reason, never "fixed".** Read-only: the tracker can't and won't change the account.
+- **`PUT /settings` still clears the category when `categoryId` is missing, as in v0.1.0; `balanceAccountId` changes only when it's sent.** The existing route and the existing UI call keep their behavior.

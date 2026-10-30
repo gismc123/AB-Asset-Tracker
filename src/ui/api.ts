@@ -66,7 +66,9 @@ export interface LoanClient {
   readonly loanId: number;
   state(): Promise<StateView>;
   saveSetup(setup: LoanSetup): Promise<StateView>;
-  saveSettings(categoryId: string | null): Promise<{ categoryId: string | null }>;
+  saveSettings(categoryId: string | null): Promise<{ categoryId: string | null; balanceAccountId: string | null }>;
+  /** Compare the balance with this Actual account's (null: stop comparing). */
+  setBalanceAccount(categoryId: string | null, accountId: string | null): Promise<StateView>;
   categories(): Promise<CategoryGroup[]>;
   candidates(payment: number, categoryId: string, wide?: boolean): Promise<Candidate[]>;
   match(payment: number, transactionId: string, categoryId: string): Promise<MatchResult>;
@@ -160,6 +162,10 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       state,
       saveSetup: (setup) => call('PUT', `${at}/setup`, setup),
       saveSettings: (categoryId) => call('PUT', `${at}/settings`, { categoryId }),
+      async setBalanceAccount(categoryId, balanceAccountId) {
+        await call('PUT', `${at}/settings`, { categoryId, balanceAccountId });
+        return state();
+      },
       categories: () => call('GET', '/categories'),
       candidates: (n, cat, wide) => call('GET', `${at}/months/${n}/candidates?categoryId=${q(cat)}${wide ? '&wide=1' : ''}`),
       match: (n, transactionId, categoryId) => call('POST', `${at}/months/${n}/match`, { transactionId, categoryId }),
