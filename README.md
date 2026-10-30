@@ -214,7 +214,7 @@ If it doesn't, the log line above it says what's wrong; see
 Click **Loans** in Actual's sidebar. The welcome screen asks what kind of
 loan to add, then shows only the fields that kind needs.
 
-![The first-run welcome screen: a short explanation, then a choice of mortgage, auto loan or personal loan](docs/screenshots/first-run.png)
+![The first-run welcome screen: a short explanation, then a choice of mortgage, auto loan, personal loan or student loan](docs/screenshots/first-run.png)
 
  Have your loan paperwork or a recent statement at hand. See [Adding a loan](#adding-a-loan)
 for what each field means.
@@ -370,10 +370,10 @@ If you used setup A, keep using Actual on its own port (5006) as before.
 listed beneath it the way Actual lists accounts: equity is the headline
 number, and what you owe is underneath. Click a loan to open it.
 
-<img src="docs/screenshots/sidebar.png" alt="The Loans list in Actual's sidebar: a mortgage, a car loan and a personal loan, each with equity and the amount owed" width="240" />
+<img src="docs/screenshots/sidebar.png" alt="The Loans list in Actual's sidebar: a mortgage, a car loan, a personal loan and a student loan, each with equity or the amount owed" width="240" />
 <img src="docs/screenshots/sidebar-dark.png" alt="The same Loans list in the dark theme" width="240" />
 
-Every loan is one of three types. The type only decides which parts are
+Every loan is one of four types. The type only decides which parts are
 switched on; the math underneath is the same amortizing loan.
 
 | Type | Optional parts | Equity is measured against | Its value screen |
@@ -381,16 +381,18 @@ switched on; the math underneath is the same amortizing loan.
 | **Mortgage** | PMI, escrow (both on by default, each can be turned off) | The home | **Equity** |
 | **Auto loan** | none | The vehicle, with an optional depreciation curve | **Vehicle** |
 | **Personal loan** | none | Nothing by default; you can add an asset | **Totals** (or **Asset**) |
+| **Student loan** | none | Nothing by default; you can add an asset | **Totals** (or **Asset**) |
 
 Each loan has these screens:
 
 | Screen | What you see |
 |---|---|
-| **Overview** | Payment number (e.g. *4 of 360*), balance, percent paid, equity, a balance chart, and either the PMI countdown (mortgages with PMI) or a payoff card: payments left, payoff today, total interest and fees. |
+| **Overview** | Payment number (e.g. *4 of 360*), balance, percent paid, equity, a balance chart with the effective rate (fees included, an estimate), and either the PMI countdown (mortgages with PMI) or a payoff card: payments left, payoff today, total interest and fees. With a [cross-check](#cross-check-with-an-actual-account) set up, whether the balance matches your Actual account. |
 | **Equity / Vehicle / Asset / Totals** | The asset's value, what you owe, equity and loan-to-value; how the equity was built; equity over time and milestones; the asset's value history; and a table of principal, interest, fees, PMI and escrow for this month, this quarter, the year, the loan so far and the life of the loan. A loan without an asset shows just the table and a button to add one. |
 | **Escrow** | Mortgages with escrow only. Escrow from each payment, the tax and insurance bills paid from it, a running balance, totals by year, and whether a year of collections covers a year of bills. |
-| **Reconcile** | One month at a time. Pick the loan's category, click the matching transaction, and the month is marked paid. If the amount is off, you're asked why. You can also mark a month as skipped here. |
-| **Schedule** | Every payment: due date, principal, interest, extra principal, PMI, escrow and fees where the loan has them, total, balance, and status (*scheduled*, *flagged*, *paid*, *skipped*, or *before tracking*). Click any row to reconcile it. |
+| **Reconcile** | One month at a time. Pick the loan's category, click the matching transaction, and the month is marked paid. If the amount is off, you're asked why. Add any number of [extra payments](#extra-payments) made on their own, or mark a month as skipped. |
+| **Schedule** | Every payment: due date, principal, interest, extra principal, PMI, escrow and fees where the loan has them, total, balance, and status (*scheduled*, *flagged*, *paid*, *skipped*, or *before tracking*). Extra payments show under their month, and months from [your lender's table](#importing-your-lenders-amortization-table) have a *bank table* badge. Click any row to reconcile it. |
+| **What if** | Try a higher monthly payment or a one-time lump sum without saving anything: the new payoff date next to the current one, months saved, what you'd owe and your equity on chosen dates. See [What if](#what-if). |
 | **Details** | Reference details that fit the loan type: servicer, account number, lender, insurance, and for a mortgage the property, tax parcel and PMI certificate, or for a vehicle the VIN and plate. Plus notes and fields of your own. |
 | **Setup** | The loan terms you enter once, with a live preview, plus rename, archive and delete. |
 
@@ -398,10 +400,11 @@ Each loan has these screens:
 
 A $320,000 loan at 6.5% for 30 years on a $355,000 home, with $148 a month
 of PMI and $412.50 of escrow. The payment is **$2,583.12**: $2,022.62 of
-principal and interest, plus PMI and escrow. After four payments the balance
-is $318,833.42. A September online estimate puts the home at $368,000, so
-equity is **$49,167**. PMI is scheduled to come off in June 2034, 106
-payments from now.
+principal and interest, plus PMI and escrow. After four payments and a
+$1,000 extra payment in June, the balance is $317,828.00. A September online
+estimate puts the home at $368,000, so equity is **$50,172**. PMI is
+scheduled to come off in June 2034, 106 payments from now. The balance
+matches the loan's account in Actual, which the Overview confirms.
 
 **Reconcile.** Match the payment that synced into Actual. When it differs
 from the schedule, pick what the difference is:
@@ -415,30 +418,33 @@ from the schedule, pick what the difference is:
 
 ![Escrow screen: escrow balance, yearly cushion, balance chart, totals by year, and the ledger of payments and bills](docs/screenshots/escrow.png)
 
-![Schedule screen listing payments with principal, interest, PMI, escrow, total, balance and status](docs/screenshots/schedule.png)
+![Schedule screen listing payments with principal, interest, PMI, escrow, total, balance and status, with a $1,000 extra payment shown under payment 3](docs/screenshots/schedule.png)
 
 </details>
 
 ### Example: a car loan
 
 A $30,000 loan at 6.9% for 60 months on a $36,000 hatchback, with $6,000
-down and a $299 processing fee, using daily simple interest. After six
-payments you owe $27,439.32. A September pricing guide values the car at
-$32,500, so equity is **$5,061**. The car is set to lose an estimated 15% a
-year, so the equity chart follows that curve, and the screen shows the
-projected value today ($32,112) next to the value you entered.
+down, a $299 processing fee and a $25 late charge, using daily simple
+interest. After six payments and a $750 extra payment you owe $26,682.50.
+The car's value comes from an off-budget account in Actual that you keep up
+to date: $31,900, so equity is **$5,218**. The car is set to lose an
+estimated 15% a year, so the equity chart follows that curve from today's
+value.
 
-![Vehicle screen of a sample car loan: vehicle value with a projected estimate, what you owe, equity, loan-to-value, how equity was built, and the vehicle's value history](docs/screenshots/vehicle.png)
+![Vehicle screen of a sample car loan: vehicle value read from an Actual account, what you owe, equity, loan-to-value, how equity was built, and the vehicle's value history](docs/screenshots/vehicle.png)
 
-A personal loan with no asset gets a payoff card and a **Totals** screen
-instead:
+A personal or student loan with no asset gets a payoff card and a **Totals**
+screen instead:
 
 <details>
 <summary>Personal loan overview</summary>
 
 ![Overview of a sample personal loan: payment 8 of 36, balance, percent paid, payoff today, and a payoff card with total interest and yearly fees](docs/screenshots/personal.png)
 
-![The Totals screen of a personal loan: principal, interest and yearly fees by month, quarter, year, loan to date and life of loan, with a button to add an asset](docs/screenshots/totals-personal.png)
+![The Totals screen of a personal loan: principal, interest and fees by month, quarter, year, loan to date and life of loan, with a button to add an asset](docs/screenshots/totals-personal.png)
+
+![Overview of a sample student loan: payment 10 of 118, balance, percent paid, payoff today, the effective rate, and a payoff card](docs/screenshots/student.png)
 
 </details>
 
@@ -472,10 +478,11 @@ Under the hood:
   and later months recalculate from them.
 - **Money is exact.** Everything is stored in whole cents (Actual's own
   unit), so the schedule matches your statement to the penny.
-- **Read-only toward Actual.** The tracker reads categories and
-  transactions through the official [`@actual-app/api`](https://actualbudget.org/docs/api/)
-  and keeps its own data in a small SQLite file in `data/`. No code path in
-  the tracker writes to your budget.
+- **Read-only toward Actual.** The tracker reads categories, transactions
+  and (only for accounts you link) account balances through the official
+  [`@actual-app/api`](https://actualbudget.org/docs/api/) and keeps its own
+  data in a small SQLite file in `data/`. No code path in the tracker writes
+  to your budget.
 
 ---
 
@@ -486,7 +493,7 @@ Under the hood:
 Open **Loans** and click **+ Add loan** (with no loans yet, the welcome
 screen starts there). Pick the type:
 
-![The Add a loan screen: cards for mortgage, auto loan and personal loan](docs/screenshots/add-loan-type.png)
+![The Add a loan screen: cards for mortgage, auto loan, personal loan and student loan](docs/screenshots/add-loan-type.png)
 
 Then fill in only what that type needs:
 
@@ -504,7 +511,7 @@ Fields every loan has, from its paperwork:
 | First payment date | From the note or the first statement. |
 | Payment due day | Day of the month. 29 to 31 move to the last day of short months. |
 | Monthly payment (P&I) | Left blank, it's calculated with the standard formula. If your statement differs by a cent, type the statement's exact amount here. |
-| Interest | Monthly (most mortgages) or daily simple interest (many car and personal loans). See [Interest: monthly or daily](#interest-monthly-or-daily). |
+| Interest | Monthly (most mortgages) or daily simple interest (many car, personal and student loans). See [Interest: monthly or daily](#interest-monthly-or-daily). |
 | Standing extra principal | Added to every payment, 0 if none. |
 | Already paying on this loan? | For a loan you've been paying for a while. See [below](#a-loan-thats-already-under-way). |
 
@@ -537,18 +544,35 @@ Optional, any loan (under **Fees and payoff quote**):
 | Field | Notes |
 |---|---|
 | Down payment | Shown with how your equity was built. |
-| One-off fees | Processing, origination, credit insurance and the like. Mark whether each was added to the loan. Counted in the cost of the loan. |
-| Yearly fee | A percent of the original amount or of the remaining balance, charged with the first payment of each loan year (payments 1, 13, 25 and so on). Part of that month's payment. |
+| One-off fees | Processing, origination, credit insurance, a late charge: anything charged once. For each, say how it was charged: *paid at opening*, *in the amount borrowed*, *paid separately on* a date, or *added to the balance on* a date. A fee paid separately shows on the Schedule month it falls in and in the totals, never in the payment. A fee added to the balance raises what you owe from that date; interest accrues on it and the loan runs a little longer. |
+| Yearly fee | A percent of the original amount or of the remaining balance, charged with the first payment of each loan year (payments 1, 13, 25 and so on). Either *in the monthly payment* (the bank amount includes it) or *charged separately* (shown on the Schedule, but the payment you reconcile leaves it out). |
 | Payoff quote | An amount from your lender and its good-through date. Used for *payoff today* instead of the estimate until it expires. |
 
-![The Extras, fees and payoff card: standing extra principal, down payment, one-off fees, a yearly fee of 0.5% of the balance, and a payoff quote](docs/screenshots/setup-fees.png)
+![The Extras, fees and payoff card: standing extra principal, down payment, a credit insurance fee added to the balance on a date, a yearly fee of 0.5% of the balance charged separately, and a payoff quote](docs/screenshots/setup-fees.png)
 
-A yearly fee shows up in its own column on the Schedule:
+Fees show up in their own column on the Schedule. A star marks a fee that
+isn't part of that month's payment (charged separately or added to the
+balance); hover over it for the details:
 
 <details>
-<summary>Schedule with a yearly fee</summary>
+<summary>Schedule with fees</summary>
 
-![A personal loan's schedule with a Fee column: $60.00 with payment 1 and $42.24 with payment 13](docs/screenshots/schedule-personal.png)
+![A personal loan's schedule with a Fee column: a yearly fee charged separately with payments 1 and 13, and credit insurance added to the balance with payment 6, each starred](docs/screenshots/schedule-personal.png)
+
+</details>
+
+**Effective rate.** Under the balance chart on the Overview, next to the
+note rate, is the loan's effective yearly rate with its fees, labeled an
+estimate. It's the rate, compounded monthly, at which what you received
+when the loan was opened (the amount borrowed, minus fees paid at opening
+or financed) equals what you pay back on the original schedule (principal,
+interest, yearly fees and later fees). PMI, escrow and extra principal are
+left out. *How is this worked out?* lists what went into it.
+
+<details>
+<summary>The effective rate and its explanation</summary>
+
+![The balance chart card of a car loan: total interest, fees and payoff date, then "Rate 6.90%, effective about 7.62% a year, estimate", with the explanation opened](docs/screenshots/effective-rate.png)
 
 </details>
 
@@ -628,6 +652,79 @@ offset* field (under the transaction list) for that.
 **Missed a month?** Months don't have to be reconciled in order. The
 Schedule screen shows every month's status; click any row to reconcile it.
 
+### Extra payments
+
+Extra principal paid **on its own**, in a separate transaction from the
+regular payment, goes under **Extra principal paid on its own** on the
+Reconcile screen. A month can have its one regular payment plus any number
+of extras:
+
+- **Add one from Actual** lists unused payments in the loan's category near
+  that month; click one. **Enter one by hand** takes a date and an amount,
+  for an extra paid from another account.
+- Each extra applies **on its own date**. On a monthly-interest loan it comes
+  off the balance after the payment due on or before that date, so the next
+  payment's interest is lower. On a daily-interest loan interest on that
+  amount stops the day it was paid. An extra dated after this month's due
+  date shows with the next month, and the screen says so.
+- Each extra has its own **✕**, here and under its month on the Schedule
+  (where **+** next to a month's extra column adds one). Removing one leaves
+  the others and every reconciled month as they were.
+- Later interest, the payoff date and the PMI dates follow the real balance
+  after each extra. Reconciled months keep their locked amounts: an extra is
+  applied on top of the regular payment, never mixed into it.
+
+Extra principal sent **inside** the regular payment is still answered as
+*Extra principal* when that month is flagged, as before.
+
+![Reconcile for a paid month: the locked amounts with $1,000 of extra payments, and below, the extra principal paid on its own card listing a $1,000 payment from June 18 with a remove button](docs/screenshots/reconcile-extras.png)
+
+### What if
+
+The **What if** screen answers "when would I be done if I paid more?"
+without changing anything. Enter an **extra each month**, a **one-time
+payment** with its date, or both. Side by side you see the payoff date as it
+stands and with what you tried, how much sooner that is, and what you'd owe
+and your equity on three dates you can change (1, 5 and 10 years from today
+to start). Interest over the loan is there too, in smaller print, and a
+chart shows both balances.
+
+It starts from the loan as it really stands, with every payment, extra and
+skip you've recorded. Nothing is saved unless you click **Make $X a month
+my standing extra**: from the next unpaid payment on, the schedule then
+expects that much more with each payment. Standing extras set this way are
+listed on the same screen with a **Remove** button. A one-time payment is
+never saved; when you really make it, add it as an [extra payment](#extra-payments).
+
+![What if for a sample mortgage: $200 more a month and $5,000 once in March 2026 move the payoff from December 2054 to about seven years sooner, with what you'd owe and equity on three dates, interest totals, and a chart of both balances](docs/screenshots/what-if.png)
+
+### Importing your lender's amortization table
+
+If your lender's interest doesn't match the calculation to the cent (they
+count days differently, round differently, or just won't say how), import
+their table and those months use the lender's numbers exactly. On the
+**Schedule** screen, open **Lender's amortization table**:
+
+1. **Choose a CSV file** or paste the table. PDF isn't supported: open the
+   lender's table in a spreadsheet and save it as CSV.
+2. Check the **columns**: date, payment number, payment, principal,
+   interest and balance. They're guessed from the column names; interest is
+   required, plus principal or the payment. Set the date and number format
+   if they weren't guessed right.
+3. **Preview** shows each month's interest and principal now and from the
+   lender, and whether the balance after the last month matches the
+   lender's. Nothing is saved yet.
+4. **Use these months.** Each one gets a *bank table* badge on the Schedule.
+
+Months are matched by payment number when the file has one, or by the
+month of the date. After the table ends, months are calculated again from
+the balance it leaves. Reconciled, skipped and before-tracking months keep
+what they have. Importing a month again replaces it; **Show months** lists
+them with a **✕** each, and **Remove all** goes back to the calculation. The
+penny offset and the P&I payment field keep working as before.
+
+![The lender's amortization table card: six months pasted from a CSV, the columns mapped, and a preview of interest and principal now and from the lender, with the balance matching the lender's to the cent](docs/screenshots/bank-import.png)
+
 ### Skipping a payment
 
 If your lender approves skipping a payment (a hardship grace period, a
@@ -661,6 +758,23 @@ deferred or past-due amounts). The value is the latest one you've entered on
 the value screen (an appraisal, a tax assessment, a pricing guide, an online
 estimate), or the purchase price until you enter one. A value of 0 is
 allowed, for a car that was totaled or anything written off.
+
+**Value from an Actual account.** If you already keep the asset's value in
+an account in Actual (usually off budget, kept up to date by hand or by a
+helper tool), click **Use an Actual account's balance** on the value screen
+and pick the account. Its balance becomes the asset's value, read each time
+you open the loan; the screen says which source is in use. The values you
+entered stay as the fallback: they're used if the account can't be read,
+was deleted, or has a negative balance (a debt account picked by mistake).
+**Stop using it** goes back to them. The account is only read, never
+changed.
+
+<details>
+<summary>A value read from an Actual account</summary>
+
+![The Vehicle value card: "Value from your Actual account Hatchback value: $31,900, as of Oct 12, 2025. The values below are the fallback," with Change and Stop using it, the entered values, and the form to add one](docs/screenshots/value-from-actual.png)
+
+</details>
 
 **Projected value.** An asset can also have a yearly trend: a drop for
 vehicles (15% a year is offered as a starting point) or a rise for a home.
@@ -723,8 +837,10 @@ Each loan uses one of two methods, chosen under Setup:
   first). Once a payment is matched to a bank transaction, **the date your
   bank paid it is used**: paying a few days early means less interest and
   more principal that month. Extra principal sent with a payment lowers the
-  balance from that day. The scheduled last payment settles whatever is
-  left, so it can differ from the others.
+  balance from that day, and an [extra payment](#extra-payments) of its own
+  from the day it was paid: a $2,000 extra on the 10th cuts interest on
+  $2,000 for the rest of the period only. The scheduled last payment settles
+  whatever is left, so it can differ from the others.
 
 Daily interest uses a 365-day year, including in leap years. See
 [Known limitations](docs/KNOWN_LIMITATIONS.md) for lenders that count days
@@ -775,6 +891,20 @@ the last reconciled month.
 You can also let reconciling find it: when a payment comes in short by the
 PMI amount (or still includes PMI after the schedule dropped it), answer
 **PMI changed** for that month. No PMI at all? Turn it off under Setup.
+
+### Cross-check with an Actual account
+
+If you keep the loan's balance in an account in Actual too (an off-budget
+loan account you split each payment into), the tracker can check the two
+agree. Under **Setup**, in **Cross-check with Actual**, pick the account.
+The Overview then says whether the balance **matches** that account, or by
+how much it **differs** (usually a payment reconciled here but not yet split
+in Actual, or the other way round). Actual shows a loan account as a
+negative balance; the two are compared without the sign. It's off until you
+pick an account, and the account is only read. **Stop comparing** turns it
+off.
+
+![The Cross-check with Actual card under Setup: a short explanation and Comparing with Mortgage balance, with Change and Stop comparing](docs/screenshots/balance-check-setup.png)
 
 ### Backing up and restoring
 
