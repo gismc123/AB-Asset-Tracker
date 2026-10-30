@@ -138,3 +138,8 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **Comparison dates default to 1, 5 and 10 years from today, and can be changed.** Short, medium and long horizons without typing.
 - **"Make this my standing extra" records a standing-extra change from the next unpaid payment, on top of any standing extra already in place, and can be removed from the same screen.** It uses the adjustment the reconcile flow already writes, so nothing new is stored; reconciled months keep what they paid. The lump sum is never saved: when it's really paid, it's recorded as an extra payment.
 - **Equity on a future date uses the asset's projected curve when it has one, otherwise its value today.** The same value on both plans, so the difference is only what's owed.
+
+### Daily interest
+
+- **Shipped: daily accrual per loan, off by default (monthly).** It existed in v0.1.0; v0.2.0 adds dated extra payments, so a mid-month extra cuts interest only for the days after it. A three-period example worked by hand (with an extra and an early payment) is a test, to the cent.
+- **Within a period with extras, balance-days are summed and rounded once.** With no extra this is exactly v0.1.0's single rounding, so existing daily loans keep every cent.

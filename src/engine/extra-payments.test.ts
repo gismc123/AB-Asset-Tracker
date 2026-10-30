@@ -128,6 +128,25 @@ describe('extra payments of their own, daily interest', () => {
     expect(r.endingBalance).toBe(800_000 - (s.piPayment - 5_360));
   });
 
+  it('matches a worked example over three periods, to the cent', () => {
+    // Worked by hand (and checked separately) for $10,000 at 7.3% (0.02% a day), 12 payments:
+    //   payment = $866.65
+    //   1: Jan 1 to Feb 1, 31 days on $10,000.00            = $62.00 interest, $804.65 principal, balance $9,195.35
+    //   $1,000 extra on Feb 11; payment 2 paid early, Feb 26:
+    //   2: 10 days on $9,195.35 + 15 days on $8,195.35       = $42.98 interest, $823.67 principal, balance $7,371.68
+    //   3: Feb 26 to Apr 1, 34 days on $7,371.68             = $50.13 interest, $816.52 principal, balance $6,555.16
+    const s = generateSchedule(DAILY, { paidDates: new Map([[2, '2025-02-26']]), extraPayments: [extra(1, '2025-02-11', 100_000)] });
+    expect(s.piPayment).toBe(86_665);
+    expect(s.rows.slice(0, 3).map((r) => [r.interest, r.scheduledPrincipal, r.extraPayments, r.endingBalance])).toEqual([
+      [6_200, 80_465, 0, 919_535],
+      [4_298, 82_367, 100_000, 737_168],
+      [5_013, 81_652, 0, 655_516],
+    ]);
+    // The same loan with monthly interest ignores the day: 1/12 of the rate on the balance.
+    const monthly = generateSchedule({ ...DAILY, interestMethod: 'monthly' }, { extraPayments: [extra(1, '2025-02-11', 100_000)] });
+    expect(monthly.rows[0]!.interest).toBe(6_083);
+  });
+
   it('an extra after the regular payment splits the next period', () => {
     const base = generateSchedule(DAILY);
     const b1 = base.rows[0]!.endingBalance;
