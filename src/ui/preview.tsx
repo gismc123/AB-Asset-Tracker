@@ -12,6 +12,7 @@ import {
   addDays,
   analyzeEquity,
   compareToSchedule,
+  effectiveRate,
   escrowReport,
   generateSchedule,
   lockRow,
@@ -293,6 +294,7 @@ class MockLoan {
         equity: asset ? analyzeEquity(this.setup, s, paid, TODAY, asset) : null,
         periods: { paid: periodBreakouts(s.rows, paidOn, TODAY, 'paid'), scheduled: periodBreakouts(s.rows, paidOn, TODAY, 'scheduled') },
         escrow: escrowReport(s.rows, paidOn, this.escrow, TODAY),
+        effectiveRate: effectiveRate(this.setup),
       },
     };
   }

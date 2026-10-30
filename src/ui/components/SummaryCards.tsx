@@ -1,4 +1,4 @@
-import type { LoanSummary } from '../../engine/index.js';
+import { ACCOUNT_VALUE_SOURCE, type LoanSummary } from '../../engine/index.js';
 import { date, money, percent } from '../format.js';
 import { Amt } from './Amt.js';
 
@@ -43,7 +43,7 @@ export function SummaryCards({ summary }: { summary: LoanSummary }) {
           <div className="mt-kpi-note">
             {summary.asset.valueEntered ? (
               <>
-                {percent(summary.asset.equityPercent)} of <Amt cents={summary.asset.value} whole /> ({date(summary.asset.valueDate, 'month')} {summary.asset.valueSource.toLowerCase()})
+                {percent(summary.asset.equityPercent)} of <Amt cents={summary.asset.value} whole /> ({date(summary.asset.valueDate, 'month')} {summary.asset.valueSource === ACCOUNT_VALUE_SOURCE ? 'from Actual' : summary.asset.valueSource.toLowerCase()})
               </>
             ) : (
               <>{percent(summary.asset.equityPercent)} of the original {summary.asset.kind === 'home' ? 'home value' : 'value'}</>

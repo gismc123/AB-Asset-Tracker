@@ -153,3 +153,10 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **Fees use the same dated-event placement as extra payments.** Monthly loans apply them after the payment due on or before their date; daily loans split the interest period at the date. One rule to learn and test.
 - **A yearly fee can be charged with the payment (default, v0.1.0 behavior) or separately.** Charged separately, it stays on payments 1, 13, 25 even when that month is skipped or reconciled, since it isn't part of the payment.
 - **Schedule totals keep `fees` as yearly fees and add `oneOffFees` and `feesAdded`.** Existing readers of `fees` see the same number; the new totals are additions.
+
+### Effective rate
+
+- **The effective rate is the yearly rate, compounded monthly, that makes what was received equal what is paid back on the original schedule, and it's always labeled an estimate.** It is the effective annual rate (EAR), not a regulatory APR; it says one plain thing and a short explanation sits under it.
+- **Received is the amount borrowed less fees paid at opening and fees financed into it; paid back is principal and interest, yearly fees and later one-off fees.** That's the standard way fees raise a loan's real rate. A fee added to the balance counts through the extra payments it causes.
+- **PMI, escrow and extra principal are left out, and it follows the original schedule.** PMI and escrow are insurance and taxes, extra principal is a choice, and skips are events; the rate describes the loan's terms.
+- **Shown on the Overview under the totals, not in the headline cards.** It's context for the cost of the loan, not something tracked month to month.

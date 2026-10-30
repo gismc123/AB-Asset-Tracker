@@ -8,6 +8,7 @@ import { Amt } from './Amt.js';
 import { BackupView } from './BackupView.js';
 import { BalanceChart } from './BalanceChart.js';
 import { DetailsView } from './DetailsView.js';
+import { EffectiveRateNote } from './EffectiveRateNote.js';
 import { EquityView } from './EquityView.js';
 import { EscrowView } from './EscrowView.js';
 import { LoanPicker, type PickerScreen } from './LoanPicker.js';
@@ -369,9 +370,10 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
                 {modules.pmi && <> · PMI <Amt cents={s.totals.pmi} whole /></>}
                 {s.totals.fees + s.totals.oneOffFees + s.totals.feesAdded > 0 && (
                   <> · fees <Amt cents={s.totals.fees + s.totals.oneOffFees + s.totals.feesAdded} whole /></>
-                )}{' '}
-                · payoff {date(s.rows.at(-1)?.dueDate, 'month')}
+                )}
+                {' · '}payoff {date(s.rows.at(-1)?.dueDate, 'month')}
               </div>
+              {state.analysis?.effectiveRate && <EffectiveRateNote rate={state.analysis.effectiveRate} />}
             </div>
             {modules.pmi ? (
               <PmiCountdown state={state} client={client} onState={setState} />

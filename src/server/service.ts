@@ -3,6 +3,7 @@ import {
   addYears,
   analyzeEquity,
   dueDateFor,
+  effectiveRate,
   compareToSchedule,
   escrowReport,
   isEscrowKind,
@@ -35,6 +36,7 @@ import {
   type YearlyFee,
   type Cents,
   type EquityAnalysis,
+  type EffectiveRate,
   type EscrowReport,
   type ExtraPayment,
   type GenerateOptions,
@@ -119,6 +121,8 @@ export interface StateView {
     equity: EquityAnalysis | null;
     periods: Record<'paid' | 'scheduled', PeriodBreakouts>;
     escrow: EscrowReport;
+    /** Note rate and fees as one yearly rate. An estimate; null when it can't be worked out. */
+    effectiveRate: EffectiveRate | null;
   } | null;
 }
 
@@ -434,6 +438,7 @@ export class LoanService {
           scheduled: periodBreakouts(schedule.rows, paidOn, today, 'scheduled'),
         },
         escrow: escrowReport(schedule.rows, paidOn, this.store.listEscrowEntries(), today),
+        effectiveRate: effectiveRate(setup),
       },
     };
   }

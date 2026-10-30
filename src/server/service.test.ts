@@ -716,3 +716,13 @@ describe('fees in the setup', () => {
     await expectHttp(() => service.saveSetup({ ...SAMPLE_SETUP, fees: [{ label: 'X', amount: 100, financed: false, addedToBalance: true }] }), 400);
   });
 });
+
+describe('effective rate', () => {
+  it('is in the loan state, with what went into it', () => {
+    const s = service.saveSetup({ ...SAMPLE_SETUP, fees: [{ label: 'Origination', amount: 320_000, financed: false }] });
+    expect(s.analysis!.effectiveRate).toMatchObject({ nominalPercent: 6.5, feesAtOpening: 320_000, hasFees: true });
+    // 6.5% compounded monthly is 6.70%; a 1% fee at opening adds about a tenth of a point over 30 years.
+    expect(s.analysis!.effectiveRate!.percent).toBeGreaterThan(6.7);
+    expect(s.analysis!.effectiveRate!.percent).toBeLessThan(6.9);
+  });
+});
