@@ -28,7 +28,7 @@ import {
   type LoanSetup,
   type LockedPayment,
 } from '../engine/index.js';
-import type { AssetRecord, LoanDetails, LoanRecord, StoredExtraPayment } from '../server/db.js';
+import type { AssetRecord, LoanDetails, LoanRecord, StoredBankRow, StoredExtraPayment } from '../server/db.js';
 import type { MonthView, StateView } from '../server/service.js';
 import { ApiError, type BudgetAccount, type Candidate, type CategoryGroup, type LoanClient, type LoanListItem, type TrackerClient } from './api.js';
 import { mountTrackerApp } from './mount.js';
@@ -108,6 +108,8 @@ interface Seed {
   extras: [string, number][];
   /** A payment of its own in the bank, not recorded yet, to try adding: [date, amount]. */
   spareExtra: [string, number] | null;
+  /** Payments whose interest comes from a made-up lender's table (a few cents off the calculation): [first, last]. */
+  bankTable?: [number, number];
   escrow: EscrowEntry[];
   details: LoanDetails;
 }
@@ -156,6 +158,7 @@ const SEEDS: Seed[] = [
     extraOn: null,
     extras: [],
     spareExtra: null,
+    bankTable: [9, 14],
     escrow: [],
     details: { fields: { servicerName: 'Sample Credit Union' }, custom: [] },
   },
@@ -206,6 +209,7 @@ class MockLoan {
   escrow: EscrowEntry[];
   details: LoanDetails;
   extras: StoredExtraPayment[] = [];
+  bank: StoredBankRow[] = [];
 
   constructor(seed: Seed | { loan: LoanRecord; setup: LoanSetup; asset: Omit<AssetRecord, 'id' | 'loanId'> | null }) {
     this.loan = seed.loan;
@@ -240,6 +244,14 @@ class MockLoan {
       const row = this.build([k, txn.date]).rows[k - 1]!;
       this.months.set(k, { status: 'paid', txn, locked: lockRow(row), resolution: null });
     }
+    if (seed.bankTable) {
+      const [from, to] = seed.bankTable;
+      let balance: number | null = null;
+      this.bank = this.build().rows.slice(from - 1, to).map((r) => {
+        balance = (balance ?? r.beginningBalance) - (r.scheduledPrincipal - 3);
+        return { payment: r.payment, dueDate: r.dueDate, paymentAmount: r.principalAndInterest, principal: r.scheduledPrincipal - 3, interest: r.interest + 3, balance, importedAt: '' };
+      });
+    }
   }
 
   options(paidOn?: [number, string]) {
@@ -247,7 +259,8 @@ class MockLoan {
     const paidDates = new Map([...this.months].map(([k, m]) => [k, m.txn.date]));
     if (paidOn) paidDates.set(paidOn[0], paidOn[1]);
     const extraPayments = this.extras.map((e) => ({ id: e.id, date: e.date, amount: e.amount }));
-    return { adjustments: this.adjustments.map((a) => a.adj), locked, paidDates, extraPayments };
+    const bankRows = new Map(this.bank.map((r) => [r.payment, { principal: r.principal, interest: r.interest }]));
+    return { adjustments: this.adjustments.map((a) => a.adj), locked, paidDates, extraPayments, bankRows };
   }
 
   build(paidOn?: [number, string]) {
@@ -266,7 +279,7 @@ class MockLoan {
     const linked = this.asset ? withAccountValue(this.asset, reading(this.asset.actualAccountId)) : null;
     const base = {
       loan: this.loan, asset: this.asset, assetValue: linked?.source ?? null, setup: this.setup, settings: { categoryId: this.categoryId },
-      source: { connected: true, lastSync: null, error: null }, today: TODAY, details: this.details, extraPayments: this.extras,
+      source: { connected: true, lastSync: null, error: null }, today: TODAY, details: this.details, extraPayments: this.extras, bankSchedule: this.bank,
       adjustments: this.adjustments.map((a, i) => ({ id: i + 1, adjustment: a.adj, sourcePayment: a.source, createdAt: '' })),
     };
     if (!this.setup) return { ...base, schedule: null, summary: null, analysis: null };
@@ -399,6 +412,34 @@ class MockLoan {
       },
       async deleteExtraPayment(id) {
         self.extras = self.extras.filter((e) => e.id !== id);
+        return state();
+      },
+      async previewBankSchedule(rows) {
+        const before = self.build();
+        const options = self.options();
+        for (const r of rows) options.bankRows.set(r.payment, { principal: r.principal, interest: r.interest });
+        const after = generateSchedule(self.setup!, options);
+        const preview = rows.map((r) => {
+          const now = before.rows[r.payment - 1];
+          const then = after.rows[r.payment - 1];
+          const note = !now ? 'Not on the schedule' : self.months.get(r.payment)?.status === 'paid' ? 'Reconciled: keeps what it paid' : now.skipped ? 'Skipped month' : null;
+          const split = (x: typeof now) => (x ? { interest: x.interest, principal: x.scheduledPrincipal, endingBalance: x.endingBalance } : null);
+          return { payment: r.payment, dueDate: now?.dueDate ?? r.dueDate, bank: r, now: split(now), then: split(then), applies: note === null, note };
+        });
+        const last = [...preview].reverse().find((p) => p.applies && p.bank.balance !== null && p.then);
+        return later({
+          rows: preview, applies: preview.filter((p) => p.applies).length,
+          balanceCheck: last ? { payment: last.payment, bank: last.bank.balance!, tracker: last.then!.endingBalance } : null,
+          payoffDate: { now: before.rows.at(-1)?.dueDate ?? null, then: after.rows.at(-1)?.dueDate ?? null },
+        });
+      },
+      async saveBankSchedule(rows) {
+        const keep = self.bank.filter((b) => !rows.some((r) => r.payment === b.payment));
+        self.bank = [...keep, ...rows.map((r) => ({ ...r, importedAt: '' }))].sort((a, b) => a.payment - b.payment);
+        return state();
+      },
+      async deleteBankSchedule(n) {
+        self.bank = n === undefined ? [] : self.bank.filter((b) => b.payment !== n);
         return state();
       },
       async whatIf(input) {

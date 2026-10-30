@@ -1,11 +1,11 @@
-import type { Cents, EscrowKind, ISODate, LoanSetup, SkipMode, WhatIfResult } from '../engine/index.js';
+import type { BankRow, Cents, EscrowKind, ISODate, LoanSetup, SkipMode, WhatIfResult } from '../engine/index.js';
 import type { BudgetAccount, CategoryGroup } from '../server/actual.js';
 import type { Backup, RestoreResult } from '../server/backup.js';
 import type { AssetInput, AssetRecord, LoanDetails, LoanRecord, LoanType } from '../server/db.js';
-import type { Candidate, LoanListItem, MatchResult, StateView } from '../server/service.js';
+import type { BankPreview, Candidate, LoanListItem, MatchResult, StateView } from '../server/service.js';
 import type { Resolution } from '../engine/index.js';
 
-export type { StateView, Candidate, MatchResult, CategoryGroup, BudgetAccount, LoanDetails, LoanListItem, LoanRecord, LoanType, AssetRecord, Backup, RestoreResult };
+export type { StateView, BankPreview, Candidate, MatchResult, CategoryGroup, BudgetAccount, LoanDetails, LoanListItem, LoanRecord, LoanType, AssetRecord, Backup, RestoreResult };
 
 export class ApiError extends Error {
   constructor(
@@ -81,6 +81,12 @@ export interface LoanClient {
   addExtraPayment(extra: { transactionId: string; payment: number; categoryId: string | null } | { date: ISODate; amount: Cents; note: string }): Promise<StateView>;
   /** Remove one extra payment; the others stay. */
   deleteExtraPayment(id: number): Promise<StateView>;
+  /** What importing these months from the lender's table would do. Saves nothing. */
+  previewBankSchedule(rows: BankRow[]): Promise<BankPreview>;
+  /** Save months from the lender's table (replacing the same months imported before). */
+  saveBankSchedule(rows: BankRow[]): Promise<StateView>;
+  /** Remove one imported month, or all of them. */
+  deleteBankSchedule(payment?: number): Promise<StateView>;
   /** Try a monthly extra and/or a lump sum against the real schedule. Saves nothing. */
   whatIf(input: { monthlyExtra: Cents; lumpSum: { date: ISODate; amount: Cents } | null; dates: ISODate[] }): Promise<WhatIfResult>;
   /** Pay `amount` more with every payment from the next unpaid one on. */
@@ -166,6 +172,9 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       clearCatchUpPlan: (n) => call('DELETE', `${at}/months/${n}/catch-up`),
       addExtraPayment: (extra) => call('POST', `${at}/extra-payments`, extra),
       deleteExtraPayment: (id) => call('DELETE', `${at}/extra-payments/${id}`),
+      previewBankSchedule: (rows) => call('POST', `${at}/bank-schedule/preview`, { rows }),
+      saveBankSchedule: (rows) => call('PUT', `${at}/bank-schedule`, { rows }),
+      deleteBankSchedule: (n) => call('DELETE', n === undefined ? `${at}/bank-schedule` : `${at}/bank-schedule/${n}`),
       whatIf: (input) => call('POST', `${at}/what-if`, input),
       setStandingExtra: (amount) => call('POST', `${at}/standing-extra`, { amount }),
       deleteStandingExtra: (id) => call('DELETE', `${at}/standing-extra/${id}`),

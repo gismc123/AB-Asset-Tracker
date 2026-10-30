@@ -36,6 +36,7 @@ import {
   type YearlyFee,
   type Cents,
   type EquityAnalysis,
+  type BankRow,
   type EffectiveRate,
   type EscrowReport,
   type ExtraPayment,
@@ -70,6 +71,7 @@ import {
   type Settings,
   type Store,
   type StoredAdjustment,
+  type StoredBankRow,
   type StoredExtraPayment,
 } from './db.js';
 import { assetWithLinkedValue, LinkedAccounts } from './linked.js';
@@ -115,6 +117,8 @@ export interface StateView {
   adjustments: StoredAdjustment[];
   /** Extra principal paid in transactions of their own. Each row says which it applied. */
   extraPayments: StoredExtraPayment[];
+  /** Months imported from the lender's amortization table. Rows using them say `fromBank`. */
+  bankSchedule: StoredBankRow[];
   details: LoanDetails;
   analysis: {
     /** Null when the loan has no asset. */
@@ -291,6 +295,56 @@ function parsePayoffQuote(v: unknown): PayoffQuote | null {
   };
 }
 
+/** What importing a lender's table would do (see `LoanService.previewBankSchedule`). */
+export interface BankPreview {
+  rows: {
+    payment: number;
+    dueDate: ISODate | null;
+    bank: BankRow;
+    now: { interest: Cents; principal: Cents; endingBalance: Cents } | null;
+    then: { interest: Cents; principal: Cents; endingBalance: Cents } | null;
+    /** False for a month that keeps what it has: reconciled, skipped, before tracking, or past the schedule. */
+    applies: boolean;
+    note: string | null;
+  }[];
+  applies: number;
+  /** The tracker's balance after the last imported month that applies, next to the lender's. */
+  balanceCheck: { payment: number; bank: Cents; tracker: Cents } | null;
+  payoffDate: { now: ISODate | null; then: ISODate | null };
+}
+
+/** Coerce `{ rows: BankRow[] }` from untrusted JSON. The browser reads the file; this checks what it sent. */
+export function parseBankRows(body: unknown): BankRow[] {
+  const b = bodyOf(body);
+  if (!Array.isArray(b.rows) || b.rows.length === 0) throw new HttpError(400, 'rows must be a list of months from the table');
+  if (b.rows.length > 1200) throw new HttpError(400, 'That table has more than 1,200 months');
+  const seen = new Set<number>();
+  return b.rows.map((v, i) => {
+    const o = bodyOf(v);
+    const where = `Row ${i + 1}`;
+    const cents = (k: string, nullable: boolean) => {
+      const x = o[k];
+      if (nullable && (x === null || x === undefined)) return null;
+      if (!Number.isInteger(x) || (x as number) < 0 || (x as number) > MAX_AMOUNT) throw new HttpError(400, `${where}: ${k} must be zero or more, in cents`);
+      return x as Cents;
+    };
+    const payment = o.payment;
+    if (!Number.isInteger(payment) || (payment as number) < 1 || (payment as number) > 1200) throw new HttpError(400, `${where}: payment must be a payment number`);
+    if (seen.has(payment as number)) throw new HttpError(400, `${where}: payment ${payment as number} appears twice`);
+    seen.add(payment as number);
+    const dueDate = o.dueDate === null || o.dueDate === undefined ? null : o.dueDate;
+    if (dueDate !== null && !isValidISODate(dueDate)) throw new HttpError(400, `${where}: dueDate must be a date like 2026-03-01, or null`);
+    return {
+      payment: payment as number,
+      dueDate: dueDate as ISODate | null,
+      paymentAmount: cents('paymentAmount', true),
+      principal: cents('principal', false)!,
+      interest: cents('interest', false)!,
+      balance: cents('balance', true),
+    };
+  });
+}
+
 function suggestionsFor(difference: Cents, modules: LoanModules): Resolution[] {
   const out: Resolution[] = [];
   if (Math.abs(difference) <= MAX_PENNY_OFFSET) out.push('rounding');
@@ -346,7 +400,8 @@ export class LoanService {
     const adjustments = this.store.listAdjustments().map((a) => a.adjustment);
     const locked = new Map<number, LockedPayment>();
     for (const m of this.store.listMonths()) if (m.status === 'paid' && m.locked) locked.set(m.payment, m.locked);
-    return { adjustments, locked, paidDates: this.paidDates(paidOn), extraPayments: this.extraPayments() };
+    const bankRows = new Map(this.store.listBankRows().map((r) => [r.payment, { principal: r.principal, interest: r.interest }]));
+    return { adjustments, locked, paidDates: this.paidDates(paidOn), extraPayments: this.extraPayments(), bankRows };
   }
 
   private build(setup: LoanSetup, paidOn?: [number, ISODate]): Schedule {
@@ -393,6 +448,7 @@ export class LoanService {
       today: this.today(),
       adjustments: this.store.listAdjustments(),
       extraPayments: this.store.listExtraPayments(),
+      bankSchedule: this.store.listBankRows(),
       details: this.store.getDetails(),
     };
     if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
@@ -691,6 +747,79 @@ export class LoanService {
   /** Remove one extra payment. Every other one, and every reconciled month, stays as it is. */
   deleteExtraPayment(id: number) {
     if (!this.store.deleteExtraPayment(id)) throw new HttpError(404, 'That extra payment is not on file');
+    return this.state();
+  }
+
+  // --- the lender's amortization table -----------------------------------------------
+
+  /**
+   * What importing these months would do, without saving: for each one, the
+   * interest and principal now and from the lender, and whether it applies
+   * (a reconciled, skipped or pre-tracking month keeps what it has). Also
+   * compares the balance after the last imported month with the lender's.
+   */
+  previewBankSchedule(body: unknown): BankPreview {
+    const rows = parseBankRows(body);
+    const setup = this.requireSetup();
+    const before = this.build(setup);
+    const options = this.options();
+    const merged = new Map(options.bankRows);
+    for (const r of rows) merged.set(r.payment, { principal: r.principal, interest: r.interest });
+    let after: Schedule;
+    try {
+      after = generateSchedule(setup, { ...options, bankRows: merged });
+    } catch (e) {
+      if (e instanceof SetupError) throw new HttpError(400, `With that table the schedule can't be built: ${e.message}`, { problems: e.problems });
+      throw e;
+    }
+    const months = new Map(this.store.listMonths().map((m) => [m.payment, m]));
+    const preview = rows.map((r) => {
+      const now = before.rows[r.payment - 1];
+      const then = after.rows[r.payment - 1];
+      const note = !now
+        ? 'Not on the schedule'
+        : now.beforeTracking
+          ? 'Before tracking began'
+          : months.get(r.payment)?.status === 'paid'
+            ? 'Reconciled: keeps what it paid'
+            : now.skipped
+              ? 'Skipped month'
+              : null;
+      return {
+        payment: r.payment,
+        dueDate: now?.dueDate ?? r.dueDate,
+        bank: r,
+        now: now ? { interest: now.interest, principal: now.scheduledPrincipal, endingBalance: now.endingBalance } : null,
+        then: then ? { interest: then.interest, principal: then.scheduledPrincipal, endingBalance: then.endingBalance } : null,
+        applies: note === null,
+        note,
+      };
+    });
+    const lastWithBalance = [...preview].reverse().find((p) => p.applies && p.bank.balance !== null && p.then);
+    return {
+      rows: preview,
+      applies: preview.filter((p) => p.applies).length,
+      balanceCheck: lastWithBalance
+        ? { payment: lastWithBalance.payment, bank: lastWithBalance.bank.balance!, tracker: lastWithBalance.then!.endingBalance }
+        : null,
+      payoffDate: { now: before.rows.at(-1)?.dueDate ?? null, then: after.rows.at(-1)?.dueDate ?? null },
+    };
+  }
+
+  /** Save months from the lender's table, replacing any already imported for the same payments. */
+  saveBankSchedule(body: unknown) {
+    const rows = parseBankRows(body);
+    const setup = this.requireSetup();
+    this.root.transaction(() => {
+      this.store.saveBankRows(rows);
+      this.build(setup); // a table the schedule can't follow rolls back
+    });
+    return this.state();
+  }
+
+  /** Remove one imported month (it goes back to the calculation), or all of them. */
+  deleteBankSchedule(payment?: number) {
+    if (!this.store.deleteBankRows(payment) && payment !== undefined) throw new HttpError(404, `Payment ${payment} has no imported row`);
     return this.state();
   }
 

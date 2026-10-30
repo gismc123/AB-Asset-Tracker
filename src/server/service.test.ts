@@ -726,3 +726,64 @@ describe('effective rate', () => {
     expect(s.analysis!.effectiveRate!.percent).toBeLessThan(6.9);
   });
 });
+
+describe("the lender's amortization table", () => {
+  /** Made-up lender rows for payments 1 to 3, a few cents of interest off the calculation. */
+  const table = () =>
+    [1, 2, 3].map((n) => {
+      const r = row(n);
+      return { payment: n, dueDate: r.dueDate, paymentAmount: r.principalAndInterest, principal: r.scheduledPrincipal - 7, interest: r.interest + 7, balance: r.endingBalance + 7 * n };
+    });
+
+  it('previews without saving, then applies; reconciled months keep what they paid', async () => {
+    source.add('t1', '2025-04-01', -row(1).total);
+    await service.match(1, { transactionId: 't1' });
+    const before = JSON.stringify(service.state());
+
+    const p = service.previewBankSchedule({ rows: table() });
+    expect(JSON.stringify(service.state())).toBe(before);
+    expect(p.rows.map((r) => [r.payment, r.applies, r.note])).toEqual([[1, false, 'Reconciled: keeps what it paid'], [2, true, null], [3, true, null]]);
+    expect(p.rows[1]!.then).toMatchObject({ interest: row(2).interest + 7, principal: row(2).scheduledPrincipal - 7 });
+    expect(p.applies).toBe(2);
+    // Month 1 kept its reconciled numbers, so after month 3 the lender is 7 cents a month (21) above the calculation and the tracker 14.
+    expect(p.balanceCheck).toEqual({ payment: 3, bank: row(3).endingBalance + 21, tracker: row(3).endingBalance + 14 });
+
+    const s = service.saveBankSchedule({ rows: table() });
+    expect(s.bankSchedule.map((r) => r.payment)).toEqual([1, 2, 3]);
+    expect(s.schedule!.rows.slice(0, 4).map((r) => r.fromBank)).toEqual([false, true, true, false]);
+    // Undo month 1: it goes back to scheduled, and the imported row applies to it.
+    const undone = service.unmatch(1);
+    expect(undone.schedule!.rows[0]).toMatchObject({ fromBank: true, interest: s.schedule!.rows[0]!.interest + 7 });
+  });
+
+  it('removes one month or all, and replaces months imported again', () => {
+    service.saveBankSchedule({ rows: table() });
+    const again = service.saveBankSchedule({ rows: [{ ...table()[1]!, interest: 1 }] });
+    expect(again.bankSchedule.find((r) => r.payment === 2)!.interest).toBe(1);
+    expect(again.bankSchedule).toHaveLength(3);
+    const one = service.deleteBankSchedule(2);
+    expect(one.bankSchedule.map((r) => r.payment)).toEqual([1, 3]);
+    expect(one.schedule!.rows[1]!.fromBank).toBe(false);
+    expect(service.deleteBankSchedule().bankSchedule).toEqual([]);
+  });
+
+  it('refuses rows that are not a table', async () => {
+    await expectHttp(() => service.previewBankSchedule({ rows: [] }), 400);
+    await expectHttp(() => service.saveBankSchedule({ rows: [{ payment: 1, principal: -1, interest: 0 }] }), 400);
+    await expectHttp(() => service.saveBankSchedule({ rows: [{ payment: 1, principal: 1, interest: 1 }, { payment: 1, principal: 1, interest: 1 }] }), 400);
+    await expectHttp(() => service.saveBankSchedule({ rows: [{ payment: 0, principal: 1, interest: 1 }] }), 400);
+    await expectHttp(() => service.deleteBankSchedule(5), 404);
+    expect(service.state().bankSchedule).toEqual([]);
+  });
+
+  it('works over HTTP', async () => {
+    const { createApp } = await import('./app.js');
+    const request = (await import('supertest')).default;
+    const app = createApp({ service: tracker, validateToken: async () => true, uiDir: '/nonexistent', summaryToken: undefined });
+    const at = '/asset-tracker-api/loans/1/bank-schedule';
+    expect((await request(app).post(`${at}/preview`).set('x-actual-token', 't').send({ rows: table() })).body.applies).toBe(3);
+    expect((await request(app).put(at).set('x-actual-token', 't').send({ rows: table() })).body.bankSchedule).toHaveLength(3);
+    expect((await request(app).delete(`${at}/2`).set('x-actual-token', 't')).body.bankSchedule).toHaveLength(2);
+    expect((await request(app).delete(at).set('x-actual-token', 't')).body.bankSchedule).toEqual([]);
+  });
+});

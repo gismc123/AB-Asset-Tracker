@@ -275,6 +275,8 @@ export interface ScheduleRow {
   endingBalance: Cents;
   /** True when the row came from locked, reconciled actual amounts. */
   locked: boolean;
+  /** Interest and principal come from the lender's imported table, not the calculation. */
+  fromBank: boolean;
   /** Made before tracking began (see `StartingPoint`): amounts are the original schedule's. */
   beforeTracking: boolean;
   /** Set when this payment is skipped. A skipped row has `total` 0. */
@@ -298,7 +300,7 @@ export interface ScheduleRow {
  */
 export type LockedPayment = Omit<
   ScheduleRow,
-  | 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking'
+  | 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking' | 'fromBank'
   | 'extraPayments' | 'extraPaymentList' | 'separateFee' | 'oneOffFees' | 'feesAdded' | 'oneOffFeeList'
 >;
 

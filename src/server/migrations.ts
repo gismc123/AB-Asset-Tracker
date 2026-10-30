@@ -306,6 +306,25 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    description: "A lender's amortization table: bank_schedule",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS bank_schedule (
+          loan_id        INTEGER NOT NULL REFERENCES loans (id) ON DELETE CASCADE,
+          payment        INTEGER NOT NULL CHECK (payment >= 1),
+          due_date       TEXT,
+          payment_amount INTEGER,
+          principal      INTEGER NOT NULL CHECK (principal >= 0),
+          interest       INTEGER NOT NULL CHECK (interest >= 0),
+          balance        INTEGER,
+          imported_at    TEXT NOT NULL,
+          PRIMARY KEY (loan_id, payment)
+        );
+      `);
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)!.version;

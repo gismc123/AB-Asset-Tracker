@@ -131,7 +131,10 @@ export function ScheduleView({ rows, modules, currentPayment, onOpen, onAddExtra
                     ) : (
                       <>
                         <td><Amt cents={r.scheduledPrincipal + r.pennyOffset} /></td>
-                        <td><Amt cents={r.interest} /></td>
+                        <td>
+                          {r.fromBank && <span className="mt-badge" title="Interest and principal from your lender's table" style={{ marginRight: 6, marginLeft: 0 }}>bank table</span>}
+                          <Amt cents={r.interest} />
+                        </td>
                         <td
                           className={r.extraPrincipal || r.extraPayments ? '' : 'muted'}
                           title={

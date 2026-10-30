@@ -37,6 +37,13 @@ export interface GenerateOptions {
    * `fromPayment` on (not with reconciled or skipped months). Never saved.
    */
   hypotheticalExtra?: { fromPayment: number; amount: Cents };
+  /**
+   * The lender's own interest and principal for some months, imported from
+   * its amortization table. Used instead of the calculated ones for months
+   * that aren't reconciled, skipped or before tracking. Later months carry
+   * on from the balance they leave.
+   */
+  bankRows?: ReadonlyMap<number, { principal: Cents; interest: Cents }>;
 }
 
 /** Loans saved before modules existed were all mortgages, with both. */
@@ -371,6 +378,7 @@ function amortize(
   paidDates: ReadonlyMap<number, ISODate> = new Map(),
   extraPayments: readonly ExtraPayment[] = [],
   hypothetical?: GenerateOptions['hypotheticalExtra'],
+  bankRows: GenerateOptions['bankRows'] = new Map(),
 ): ScheduleRow[] {
   const rows: ScheduleRow[] = [];
   const termMonths = termMonthsOf(setup);
@@ -436,6 +444,7 @@ function amortize(
         endingBalance: applied.balance,
         locked: true,
         beforeTracking: false,
+        fromBank: false,
       });
       balance = applied.balance;
       continue;
@@ -446,6 +455,7 @@ function amortize(
     const skip = withExtras && !beforeTracking ? skipAt(adjustments, k) : null;
     // A skipped month takes no events; they carry over to the next payment made.
     const eventsHere = beforeTracking || skip ? [] : takeEvents();
+    const bank = withExtras && !beforeTracking && !skip ? bankRows.get(k) : undefined;
     let interest: Cents;
     // The balance the regular payment can pay down: on a daily loan, after
     // the extras and fees earlier in the period.
@@ -461,6 +471,8 @@ function amortize(
         ? dailyInterest(balance, setup.annualRatePercent, Math.max(0, daysBetween(periodStart, periodEnd)))
         : monthlyInterest(balance, setup.annualRatePercent);
     }
+    // The lender's table has the last word on this month's split.
+    if (bank) interest = bank.interest;
     const empty = {
       payment: k,
       dueDate,
@@ -474,6 +486,7 @@ function amortize(
       total: 0,
       locked: false,
       beforeTracking: false,
+      fromBank: false,
     };
 
     if (skip === 'capitalize') {
@@ -494,8 +507,8 @@ function amortize(
       continue;
     }
 
-    let scheduledPrincipal = pi - interest;
-    if (scheduledPrincipal <= 0) {
+    let scheduledPrincipal = bank ? bank.principal : pi - interest;
+    if (!bank && scheduledPrincipal <= 0) {
       throw new SetupError([
         `Payment ${k}: the P&I payment does not cover the month's interest, so the loan would never pay off`,
       ]);
@@ -505,12 +518,12 @@ function amortize(
     // the term. Like lenders do, fold that residue into the final payment
     // instead of creating a tiny extra one. Only a small residue: after a
     // skipped payment the loan genuinely runs longer.
-    if (k >= termMonths && available - scheduledPrincipal <= Math.max(100, Math.round(pi * 0.02))) scheduledPrincipal = available;
+    if (!bank && k >= termMonths && available - scheduledPrincipal <= Math.max(100, Math.round(pi * 0.02))) scheduledPrincipal = available;
     // Daily interest makes the residue depend on the calendar, so the
     // scheduled last payment always settles the loan (later if interest was
     // added by skips). Fees added to the balance make the loan run longer
     // instead, like interest added by a skip, so it ends when it's paid.
-    if (daily && feesAddedSoFar === 0 && k >= termMonths + capitalizedSkips) scheduledPrincipal = available;
+    if (!bank && daily && feesAddedSoFar === 0 && k >= termMonths + capitalizedSkips) scheduledPrincipal = available;
 
     if (skip === 'defer' || skip === 'catchUp') {
       // The balance moves as if this installment were paid; what's missed is
@@ -582,6 +595,7 @@ function amortize(
       endingBalance: applied.balance,
       locked: false,
       beforeTracking,
+      fromBank: !!bank,
       ...NOT_SKIPPED,
     });
     balance = applied.balance;
@@ -615,7 +629,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
   const calculatedPiPayment = standardPayment(setup.originalAmount, setup.annualRatePercent, months);
   const piPayment = setup.piPaymentOverride ?? calculatedPiPayment;
 
-  const rows = amortize(setup, piPayment, adjustments, locked, true, options.paidDates, options.extraPayments, options.hypotheticalExtra);
+  const rows = amortize(setup, piPayment, adjustments, locked, true, options.paidDates, options.extraPayments, options.hypotheticalExtra, options.bankRows);
   const start = setup.startingPoint;
   if (start && rows.length <= start.payment) {
     throw new SetupError([`The original schedule pays the loan off by payment ${rows.length}, before tracking starts`]);
@@ -710,7 +724,7 @@ export function lockRow(row: ScheduleRow): LockedPayment {
   if (row.skipped) throw new Error(`Payment ${row.payment} is skipped and can't be locked as paid`);
   if (row.beforeTracking) throw new Error(`Payment ${row.payment} was made before tracking began and can't be locked`);
   const {
-    beginningBalance: _b, endingBalance: _e, locked: _l, dueDate: _d, beforeTracking: _t,
+    beginningBalance: _b, endingBalance: _e, locked: _l, dueDate: _d, beforeTracking: _t, fromBank: _k,
     extraPayments, extraPaymentList: _x, separateFee: _s, oneOffFees: _o, feesAdded: _a, oneOffFeeList: _f, ...rest
   } = row;
   // The lock is the regular payment only; extra payments are applied on top of it.

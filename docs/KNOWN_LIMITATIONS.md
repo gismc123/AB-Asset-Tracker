@@ -28,6 +28,12 @@ is planned, and in what order, is in the [roadmap](ROADMAP.md).
   rate on the balance and collects inside the monthly payment (for example
   "rate plus 1% a year") matches better when you add it to the interest
   rate instead.
+- **The lender's amortization table can be imported from CSV only.** PDF
+  tables aren't read: save the table as CSV from a spreadsheet first. The
+  table's balance column is used as a check, not copied, so after extra
+  payments recorded here the tracker's balance (the real one) and the
+  table's (which doesn't know about them) differ; re-import the lender's
+  updated table, or remove the imported months from that point on.
 - **No revolving credit.** Credit cards, lines of credit (including HELOCs)
   and 0% "pay in X months" installment plans aren't amortizing loans and
   can't be tracked.

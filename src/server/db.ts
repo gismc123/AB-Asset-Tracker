@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import type {
   Adjustment,
   AdjustmentKind,
+  BankRow,
   AssetKind,
   AssetValue,
   Cents,
@@ -60,6 +61,11 @@ export interface StoredAdjustment {
   /** Month whose reconciliation created it; null for manual entries. */
   sourcePayment: number | null;
   createdAt: string;
+}
+
+/** One month of the lender's amortization table (see `BankRow`). */
+export interface StoredBankRow extends BankRow {
+  importedAt: string;
 }
 
 /** Extra principal paid in a transaction of its own (see `ExtraPayment`). */
@@ -444,6 +450,36 @@ export class LoanStore {
       | { id: number }
       | undefined;
     return row?.id ?? null;
+  }
+
+  // --- the lender's amortization table ----------------------------------------------
+
+  listBankRows(): StoredBankRow[] {
+    return this.db
+      .prepare(
+        `SELECT payment, due_date AS dueDate, payment_amount AS paymentAmount, principal, interest, balance, imported_at AS importedAt
+         FROM bank_schedule WHERE loan_id = ? ORDER BY payment`,
+      )
+      .all(this.loanId) as StoredBankRow[];
+  }
+
+  /** Add months from the lender's table; a month already there is replaced. */
+  saveBankRows(rows: readonly BankRow[]) {
+    const now = new Date().toISOString();
+    const put = this.db.prepare(
+      `INSERT INTO bank_schedule (loan_id, payment, due_date, payment_amount, principal, interest, balance, imported_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (loan_id, payment) DO UPDATE SET due_date = excluded.due_date, payment_amount = excluded.payment_amount,
+         principal = excluded.principal, interest = excluded.interest, balance = excluded.balance, imported_at = excluded.imported_at`,
+    );
+    for (const r of rows) put.run(this.loanId, r.payment, r.dueDate, r.paymentAmount, r.principal, r.interest, r.balance, now);
+  }
+
+  /** Remove one month, or every month when `payment` is left out. Returns how many were removed. */
+  deleteBankRows(payment?: number): number {
+    return payment === undefined
+      ? this.db.prepare(`DELETE FROM bank_schedule WHERE loan_id = ?`).run(this.loanId).changes
+      : this.db.prepare(`DELETE FROM bank_schedule WHERE loan_id = ? AND payment = ?`).run(this.loanId, payment).changes;
   }
 
   // --- escrow entries ---------------------------------------------------------------

@@ -6,6 +6,7 @@ import { valueScreenLabel } from '../loanTypes.js';
 import { AddLoanWizard } from './AddLoanWizard.js';
 import { Amt } from './Amt.js';
 import { BackupView } from './BackupView.js';
+import { BankTableView } from './BankTableView.js';
 import { BalanceChart } from './BalanceChart.js';
 import { DetailsView } from './DetailsView.js';
 import { EffectiveRateNote } from './EffectiveRateNote.js';
@@ -421,6 +422,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
         />
       )}
 
+      {shown === 'schedule' && s && <BankTableView state={state} client={client} onState={setState} />}
       {shown === 'schedule' && s && (
         <ScheduleView
           rows={s.rows}

@@ -160,3 +160,14 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **Received is the amount borrowed less fees paid at opening and fees financed into it; paid back is principal and interest, yearly fees and later one-off fees.** That's the standard way fees raise a loan's real rate. A fee added to the balance counts through the extra payments it causes.
 - **PMI, escrow and extra principal are left out, and it follows the original schedule.** PMI and escrow are insurance and taxes, extra principal is a choice, and skips are events; the rate describes the loan's terms.
 - **Shown on the Overview under the totals, not in the headline cards.** It's context for the cost of the loan, not something tracked month to month.
+
+### Importing the lender's amortization table
+
+- **CSV only; no PDF.** Lenders' PDFs differ in layout, many are scans, and pulling a table out of one reliably needs either a heavy dependency or guesswork per lender. Every spreadsheet and most lender portals can save CSV. Recorded in KNOWN_LIMITATIONS.
+- **The file is read in the browser (delimiter, quotes, number and date formats guessed, every column mappable) and only the parsed months are sent.** The file never reaches the server, and the server checks every number it's sent.
+- **Months are matched by payment number when the file has one, otherwise by the month of the date.** Lenders' dates can be a day or two off the due date; the month is what matters.
+- **Imported months are stored per loan and payment (`bank_schedule`, migration 6); importing a month again replaces it.** Re-importing a corrected table needs no clean-up first, and removing one month or all is one click.
+- **An imported month uses the lender's interest and principal exactly; penny offsets, extras and fees still apply on top, and the P&I override still sets every other month.** The table replaces only what it says.
+- **Reconciled, skipped and pre-tracking months keep what they have, and the preview says so.** A reconciled month is a fact; undoing it lets the imported numbers apply.
+- **The lender's balance column is a check, not a value: the tracker's balance carries on from the imported principal, and later months recalculate from the balance the table leaves.** With no extras and a table that starts where the loan did, the two agree to the cent and the preview says so; when they don't (extras recorded here, a table that starts elsewhere) the preview shows the difference instead of silently overwriting the real balance.
+- **The preview runs on the server against the real schedule and saves nothing; "Use these months" saves.** Same pattern as what-if.

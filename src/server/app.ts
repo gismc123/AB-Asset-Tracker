@@ -188,6 +188,18 @@ export function createApp(deps: AppDeps) {
   loan.delete('/extra-payments/:id', (req, res) => {
     res.json(one(req).deleteExtraPayment(idParam(req)));
   });
+  loan.post('/bank-schedule/preview', (req, res) => {
+    res.json(one(req).previewBankSchedule(req.body));
+  });
+  loan.put('/bank-schedule', (req, res) => {
+    res.json(one(req).saveBankSchedule(req.body));
+  });
+  loan.delete('/bank-schedule', (req, res) => {
+    res.json(one(req).deleteBankSchedule());
+  });
+  loan.delete('/bank-schedule/:payment', (req, res) => {
+    res.json(one(req).deleteBankSchedule(paymentParam(req)));
+  });
   loan.post('/what-if', async (req, res) => {
     const svc = one(req);
     await service.refreshLinked();
