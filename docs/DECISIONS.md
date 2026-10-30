@@ -171,3 +171,8 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **Reconciled, skipped and pre-tracking months keep what they have, and the preview says so.** A reconciled month is a fact; undoing it lets the imported numbers apply.
 - **The lender's balance column is a check, not a value: the tracker's balance carries on from the imported principal, and later months recalculate from the balance the table leaves.** With no extras and a table that starts where the loan did, the two agree to the cent and the preview says so; when they don't (extras recorded here, a table that starts elsewhere) the preview shows the difference instead of silently overwriting the real balance.
 - **The preview runs on the server against the real schedule and saves nothing; "Use these months" saves.** Same pattern as what-if.
+
+### README and the desktop app
+
+- **The README now opens with what the add-on is, its requirements and its main limits, before installing.** People were installing it for setups it can't serve (a hosted Actual, the desktop app).
+- **The desktop app is called "not supported (untested)", never "works".** It renders its own bundled pages, so the proxy's script tag never reaches it; supporting it would mean changing the desktop app itself, which this add-on doesn't do.

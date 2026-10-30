@@ -75,6 +75,10 @@ is planned, and in what order, is in the [roadmap](ROADMAP.md).
   permissions of its own.
 - **Desktop layout only.** Narrow windows and phones use Actual's mobile
   layout, which has no sidebar, so Loans is hidden there.
+- **The Actual desktop app isn't supported, and is untested.** It shows its
+  own built-in copy of Actual's pages, which never pass through the
+  add-on, so it has no Loans tab. Open Actual in a browser on the add-on's
+  port instead.
 - **The sidebar item depends on Actual's page markup.** A big Actual update
   can hide it until the add-on is updated; Actual keeps working either way.
 - **One bank transaction per payment.** A payment made in two transactions

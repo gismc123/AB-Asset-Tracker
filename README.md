@@ -3,8 +3,8 @@
 [![Support this project on Patreon](https://img.shields.io/badge/Patreon-Support%20this%20project-F96854?logo=patreon&logoColor=white)](https://patreon.com/IvanS1123)
 
 A **Loans** section for a self-hosted [Actual Budget](https://actualbudget.org)
-server. It follows each of your loans (mortgages, car loans, personal loans)
-and what they paid for: payment number, principal vs. interest, payoff date,
+server. It follows each of your loans (mortgages, car loans, personal loans,
+student loans) and what they paid for: payment number, principal vs. interest, payoff date,
 and equity, meaning what the home or vehicle is worth minus what you still
 owe. Each month you match the payment that synced into Actual, and the
 schedule stays in step with your lender.
@@ -17,10 +17,47 @@ affiliated with or endorsed by the Actual Budget project.
 
 > All numbers in this README, the screenshots, the tests, and the sample files are made up.
 
+## What is this?
+
+AB Asset Tracker is an independent, open source add-on for a self-hosted
+Actual Budget server. It runs in two small containers next to your Actual
+server and adds a **Loans** tab to Actual's sidebar, where you track your
+loans and what they paid for. It only ever reads from your budget: it never
+creates, changes or deletes anything in Actual. It is not part of Actual
+and is not affiliated with or endorsed by the Actual Budget project.
+
+## Requirements
+
+- **A self-hosted Actual server**: one you run yourself, on a machine where
+  you can also run Docker containers. A hosted Actual service where you
+  can't add containers won't work.
+- **Docker with the Compose plugin, and git**, on that machine (Linux,
+  macOS or Windows; a Raspberry Pi works).
+- **Actual in a web browser, opened through the add-on's port** (5007 by
+  default) instead of Actual's own port. The add-on adds the Loans tab to
+  the pages it passes through, so Actual opened any other way has no
+  Loans tab.
+- **A desktop-sized browser window.**
+
+## Known limitations
+
+- **The Actual desktop app is not supported** (it is untested). The
+  desktop app shows its own built-in copy of Actual, which never passes
+  through the add-on, so it has no Loans tab. Use Actual in a browser.
+- **No mobile layout.** On a phone or a narrow window Actual switches to
+  its mobile layout, which has no sidebar, so Loans is hidden.
+- **Read-only toward Actual.** Payment splits, loan account balances and
+  everything else in your budget stay yours to enter.
+- More, including loan types it can't model yet, in
+  [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
+
 ---
 
 ## Contents
 
+- [What is this?](#what-is-this)
+- [Requirements](#requirements)
+- [Known limitations](#known-limitations)
 - [Install](#install)
 - [Update](#update)
 - [Uninstall](#uninstall)
