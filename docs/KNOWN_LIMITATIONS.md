@@ -16,10 +16,10 @@ is planned, and in what order, is in the [roadmap](ROADMAP.md).
 - **Daily interest uses a 365-day year**, including in leap years. Lenders
   that count 366 days in a leap year, or 360-day years, differ by a few
   cents a month; use a penny offset or follow your statement.
-- **Extra principal paid on its own, between two payments, isn't dated.**
-  Record it with the next regular payment (as extra principal). On a
-  daily-interest loan that means the schedule charges a few days more
-  interest on that amount than your lender does.
+- **An extra payment made in a skipped month waits for the next payment
+  made.** On a daily-interest loan it then counts from the start of that
+  next interest period, so the schedule charges a few days more interest on
+  it than your lender does.
 - **The payoff estimate is an estimate.** It adds simple daily interest from
   the last due date (not the date the bank paid) to what you owe. Your
   lender's payoff quote has the final word; enter it under Setup.
@@ -28,9 +28,6 @@ is planned, and in what order, is in the [roadmap](ROADMAP.md).
   rate on the balance and collects inside the monthly payment (for example
   "rate plus 1% a year") matches better when you add it to the interest
   rate instead.
-- **No what-if calculator.** You can't try "what if I paid $200 more a
-  month" or a one-time lump sum without saving it. A standing extra
-  principal changes the real schedule.
 - **No revolving credit.** Credit cards, lines of credit (including HELOCs)
   and 0% "pay in X months" installment plans aren't amortizing loans and
   can't be tracked.

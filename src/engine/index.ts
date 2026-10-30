@@ -8,3 +8,4 @@ export * from './periods.js';
 export * from './equity.js';
 export * from './escrow.js';
 export * from './assets.js';
+export * from './whatif.js';

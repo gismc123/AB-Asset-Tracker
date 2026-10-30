@@ -17,7 +17,9 @@ import {
   lockRow,
   periodBreakouts,
   resolutionToAdjustment,
+  standingExtraAt,
   summarize,
+  whatIf,
   withAccountValue,
   type AccountReading,
   type Adjustment,
@@ -236,12 +238,24 @@ class MockLoan {
     }
   }
 
-  build(paidOn?: [number, string]) {
+  options(paidOn?: [number, string]) {
     const locked = new Map([...this.months].filter(([, m]) => m.locked).map(([k, m]) => [k, m.locked!]));
     const paidDates = new Map([...this.months].map(([k, m]) => [k, m.txn.date]));
     if (paidOn) paidDates.set(paidOn[0], paidOn[1]);
     const extraPayments = this.extras.map((e) => ({ id: e.id, date: e.date, amount: e.amount }));
-    return generateSchedule(this.setup!, { adjustments: this.adjustments.map((a) => a.adj), locked, paidDates, extraPayments });
+    return { adjustments: this.adjustments.map((a) => a.adj), locked, paidDates, extraPayments };
+  }
+
+  build(paidOn?: [number, string]) {
+    return generateSchedule(this.setup!, this.options(paidOn));
+  }
+
+  nextUnpaid() {
+    return this.build().rows.find((r) => !r.beforeTracking && !r.skipped && !this.months.has(r.payment))?.payment ?? 1;
+  }
+
+  valuedAsset() {
+    return this.asset ? withAccountValue(this.asset, reading(this.asset.actualAccountId)).asset : null;
   }
 
   state(): StateView {
@@ -380,6 +394,19 @@ class MockLoan {
       },
       async deleteExtraPayment(id) {
         self.extras = self.extras.filter((e) => e.id !== id);
+        return state();
+      },
+      async whatIf(input) {
+        return later(whatIf(self.setup!, self.options(), { ...input, fromPayment: self.nextUnpaid() }, self.valuedAsset()));
+      },
+      async setStandingExtra(amount) {
+        const fromPayment = self.nextUnpaid();
+        const now = standingExtraAt(self.setup!, self.adjustments.map((a) => a.adj), fromPayment);
+        self.adjustments.push({ adj: { kind: 'standingExtra', fromPayment, amount: now + amount }, source: null });
+        return state();
+      },
+      async deleteStandingExtra(id) {
+        self.adjustments.splice(id - 1, 1);
         return state();
       },
       async setPmiRemoval(fromPayment) {

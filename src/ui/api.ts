@@ -1,4 +1,4 @@
-import type { Cents, EscrowKind, ISODate, LoanSetup, SkipMode } from '../engine/index.js';
+import type { Cents, EscrowKind, ISODate, LoanSetup, SkipMode, WhatIfResult } from '../engine/index.js';
 import type { BudgetAccount, CategoryGroup } from '../server/actual.js';
 import type { Backup, RestoreResult } from '../server/backup.js';
 import type { AssetInput, AssetRecord, LoanDetails, LoanRecord, LoanType } from '../server/db.js';
@@ -81,6 +81,12 @@ export interface LoanClient {
   addExtraPayment(extra: { transactionId: string; payment: number; categoryId: string | null } | { date: ISODate; amount: Cents; note: string }): Promise<StateView>;
   /** Remove one extra payment; the others stay. */
   deleteExtraPayment(id: number): Promise<StateView>;
+  /** Try a monthly extra and/or a lump sum against the real schedule. Saves nothing. */
+  whatIf(input: { monthlyExtra: Cents; lumpSum: { date: ISODate; amount: Cents } | null; dates: ISODate[] }): Promise<WhatIfResult>;
+  /** Pay `amount` more with every payment from the next unpaid one on. */
+  setStandingExtra(amount: Cents): Promise<StateView>;
+  /** Remove a standing extra set from the what-if screen. */
+  deleteStandingExtra(id: number): Promise<StateView>;
   /** Record that PMI stopped from this payment on; replaces an earlier record. */
   setPmiRemoval(fromPayment: number): Promise<StateView>;
   clearPmiRemoval(): Promise<StateView>;
@@ -160,6 +166,9 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       clearCatchUpPlan: (n) => call('DELETE', `${at}/months/${n}/catch-up`),
       addExtraPayment: (extra) => call('POST', `${at}/extra-payments`, extra),
       deleteExtraPayment: (id) => call('DELETE', `${at}/extra-payments/${id}`),
+      whatIf: (input) => call('POST', `${at}/what-if`, input),
+      setStandingExtra: (amount) => call('POST', `${at}/standing-extra`, { amount }),
+      deleteStandingExtra: (id) => call('DELETE', `${at}/standing-extra/${id}`),
       setPmiRemoval: (fromPayment) => call('PUT', `${at}/pmi/removal`, { fromPayment }),
       clearPmiRemoval: () => call('DELETE', `${at}/pmi/removal`),
       async saveAsset(asset) {

@@ -87,6 +87,8 @@ export const styles = /* css */ `
 .mt-grid { display: grid; gap: 14px; }
 .mt-kpis { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .mt-two { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.mt-halves { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 860px) { .mt-halves { grid-template-columns: 1fr; } }
 @media (max-width: 860px) { .mt-two { grid-template-columns: 1fr; } }
 .mt-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; box-shadow: var(--shadow); min-width: 0; }
 .mt-card h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
@@ -192,6 +194,8 @@ export const styles = /* css */ `
 .mt-data tr.total td { font-weight: 700; border-top: 1px solid var(--border); }
 .mt-data td.muted, .mt-data .muted { color: var(--muted); }
 .mt-data .neg { color: var(--bad); }
+.mt-data .good { color: var(--good); }
+.mt-kpi-value.good { color: var(--good); }
 .mt-scroll { overflow-x: auto; }
 
 /* equity parts: one hue, bar length = size of the part */

@@ -31,6 +31,11 @@ export interface GenerateOptions {
   paidDates?: ReadonlyMap<number, ISODate>;
   /** Extra principal paid in transactions of their own (see `ExtraPayment`). */
   extraPayments?: readonly ExtraPayment[];
+  /**
+   * A what-if: this much more principal with every payment from
+   * `fromPayment` on (not with reconciled or skipped months). Never saved.
+   */
+  hypotheticalExtra?: { fromPayment: number; amount: Cents };
 }
 
 /** Loans saved before modules existed were all mortgages, with both. */
@@ -310,6 +315,7 @@ function amortize(
   withExtras: boolean,
   paidDates: ReadonlyMap<number, ISODate> = new Map(),
   extraPayments: readonly ExtraPayment[] = [],
+  hypothetical?: GenerateOptions['hypotheticalExtra'],
 ): ScheduleRow[] {
   const rows: ScheduleRow[] = [];
   const termMonths = termMonthsOf(setup);
@@ -478,6 +484,7 @@ function amortize(
       extra = k === start!.payment ? balance - scheduledPrincipal - start!.balance : 0;
     } else {
       extra = withExtras ? standingExtraAt(setup, adjustments, k) + sumFor(adjustments, 'extraPrincipal', k) : 0;
+      if (withExtras && hypothetical && k >= hypothetical.fromPayment) extra += hypothetical.amount;
       extra = Math.max(0, Math.min(extra, available - scheduledPrincipal - pennyOffset));
     }
 
@@ -542,7 +549,7 @@ export function generateSchedule(setup: LoanSetup, options: GenerateOptions = {}
   const calculatedPiPayment = standardPayment(setup.originalAmount, setup.annualRatePercent, months);
   const piPayment = setup.piPaymentOverride ?? calculatedPiPayment;
 
-  const rows = amortize(setup, piPayment, adjustments, locked, true, options.paidDates, options.extraPayments);
+  const rows = amortize(setup, piPayment, adjustments, locked, true, options.paidDates, options.extraPayments, options.hypotheticalExtra);
   const start = setup.startingPoint;
   if (start && rows.length <= start.payment) {
     throw new SetupError([`The original schedule pays the loan off by payment ${rows.length}, before tracking starts`]);

@@ -612,3 +612,77 @@ describe('extra payments of their own', () => {
     expect((await request(app).delete(`/asset-tracker-api/loans/1/extra-payments/${id}`).set('x-actual-token', 't')).status).toBe(404);
   });
 });
+
+describe('what-if', () => {
+  it('compares the real schedule with a monthly extra and a lump sum, and saves nothing', async () => {
+    source.add('t1', '2025-04-01', -row(1).total);
+    await service.match(1, { transactionId: 't1' });
+    const before = JSON.stringify({ adj: store.loan(1).listAdjustments(), extras: store.loan(1).listExtraPayments(), state: service.state() });
+
+    const r = service.whatIf({ monthlyExtra: 20_000, lumpSum: { date: '2025-09-15', amount: 500_000 }, dates: ['2030-06-15'] });
+    expect(r.input.fromPayment).toBe(2);
+    expect(r.current.payoffDate).toBe(service.state().summary!.payoffDate);
+    expect(r.scenario.payoffDate! < r.current.payoffDate!).toBe(true);
+    expect(r.monthsSaved).toBeGreaterThan(60);
+    expect(r.interestSaved).toBeGreaterThan(0);
+    expect(r.at[0]!.scenario.equity! - r.at[0]!.current.equity!).toBe(r.at[0]!.current.owed - r.at[0]!.scenario.owed);
+    expect(JSON.stringify({ adj: store.loan(1).listAdjustments(), extras: store.loan(1).listExtraPayments(), state: service.state() })).toBe(before);
+
+    // Default dates: 1, 5 and 10 years from today.
+    expect(service.whatIf({ monthlyExtra: 10_000 }).at.map((p) => p.date)).toEqual(['2026-06-15', '2030-06-15', '2035-06-15']);
+  });
+
+  it('"make this my standing extra" gives exactly the what-if payoff, and can be undone', async () => {
+    const tried = service.whatIf({ monthlyExtra: 15_000 });
+    const s = service.setStandingExtra({ amount: 15_000 });
+    expect(s.summary!.payoffDate).toBe(tried.scenario.payoffDate);
+    expect(s.schedule!.totals.interest).toBe(tried.scenario.interest);
+    const adj = s.adjustments.find((a) => a.adjustment.kind === 'standingExtra')!;
+    expect(adj).toMatchObject({ sourcePayment: null, adjustment: { fromPayment: 1, amount: 15_000 } });
+    expect(row(1).extraPrincipal).toBe(15_000);
+    expect(row(1).total).toBe(service.state().schedule!.piPayment + 15_000 + row(1).pmi + row(1).escrow);
+
+    // A second one stacks on top of the first.
+    const again = service.setStandingExtra({ amount: 5_000 });
+    expect(again.schedule!.rows[0]!.extraPrincipal).toBe(20_000);
+
+    const undone = service.deleteStandingExtra(adj.id);
+    expect(undone.adjustments.filter((a) => a.adjustment.kind === 'standingExtra')).toHaveLength(1);
+  });
+
+  it('starts a standing extra after reconciled months, and leaves those alone', async () => {
+    source.add('t1', '2025-04-01', -row(1).total);
+    await service.match(1, { transactionId: 't1' });
+    const locked = store.loan(1).getMonth(1)!.locked;
+    const s = service.setStandingExtra({ amount: 10_000 });
+    expect(s.adjustments.at(-1)!.adjustment).toMatchObject({ kind: 'standingExtra', fromPayment: 2 });
+    expect(store.loan(1).getMonth(1)!.locked).toEqual(locked);
+    expect(s.schedule!.rows[0]!.extraPrincipal).toBe(0);
+  });
+
+  it('only removes standing extras set here, and validates input', async () => {
+    source.add('t1', '2025-04-01', -(row(1).total + 10_000));
+    await service.match(1, { transactionId: 't1' });
+    const s = service.resolve(1, { resolution: 'extraPrincipal', standing: true });
+    const fromReconcile = s.adjustments.find((a) => a.adjustment.kind === 'standingExtra')!;
+    await expectHttp(() => service.deleteStandingExtra(fromReconcile.id), 404);
+    await expectHttp(() => service.setStandingExtra({ amount: 0 }), 400);
+    await expectHttp(() => service.whatIf({ monthlyExtra: -5 }), 400);
+    await expectHttp(() => service.whatIf({ lumpSum: { date: '2020-01-01', amount: 100 } }), 400);
+    await expectHttp(() => service.whatIf({ dates: ['someday'] }), 400);
+  });
+
+  it('works over HTTP', async () => {
+    const { createApp } = await import('./app.js');
+    const request = (await import('supertest')).default;
+    const app = createApp({ service: tracker, validateToken: async () => true, uiDir: '/nonexistent', summaryToken: undefined });
+    const tried = await request(app).post('/asset-tracker-api/loans/1/what-if').set('x-actual-token', 't').send({ monthlyExtra: 10_000 });
+    expect(tried.status).toBe(200);
+    expect(tried.body.monthsSaved).toBeGreaterThan(0);
+    const made = await request(app).post('/asset-tracker-api/loans/1/standing-extra').set('x-actual-token', 't').send({ amount: 10_000 });
+    expect(made.status).toBe(201);
+    expect(made.body.summary.payoffDate).toBe(tried.body.scenario.payoffDate);
+    const id = made.body.adjustments.find((a: { adjustment: { kind: string } }) => a.adjustment.kind === 'standingExtra').id;
+    expect((await request(app).delete(`/asset-tracker-api/loans/1/standing-extra/${id}`).set('x-actual-token', 't')).status).toBe(200);
+  });
+});

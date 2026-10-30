@@ -1,5 +1,6 @@
 import {
   addDays,
+  addYears,
   analyzeEquity,
   dueDateFor,
   compareToSchedule,
@@ -19,7 +20,9 @@ import {
   resolutionToAdjustment,
   ResolutionError,
   SetupError,
+  standingExtraAt,
   summarize,
+  whatIf,
   validateSetup,
   type Asset,
   type AssetKind,
@@ -34,6 +37,9 @@ import {
   type EquityAnalysis,
   type EscrowReport,
   type ExtraPayment,
+  type GenerateOptions,
+  type WhatIfInput,
+  type WhatIfResult,
   type ISODate,
   type LoanSetup,
   type LockedPayment,
@@ -325,12 +331,17 @@ export class LoanService {
     return setup;
   }
 
-  private build(setup: LoanSetup, paidOn?: [number, ISODate]): Schedule {
+  /** Everything recorded against the loan, as the schedule takes it. */
+  private options(paidOn?: [number, ISODate]): GenerateOptions {
     const adjustments = this.store.listAdjustments().map((a) => a.adjustment);
     const locked = new Map<number, LockedPayment>();
     for (const m of this.store.listMonths()) if (m.status === 'paid' && m.locked) locked.set(m.payment, m.locked);
+    return { adjustments, locked, paidDates: this.paidDates(paidOn), extraPayments: this.extraPayments() };
+  }
+
+  private build(setup: LoanSetup, paidOn?: [number, ISODate]): Schedule {
     try {
-      return generateSchedule(setup, { adjustments, locked, paidDates: this.paidDates(paidOn), extraPayments: this.extraPayments() });
+      return generateSchedule(setup, this.options(paidOn));
     } catch (e) {
       if (e instanceof SetupError) throw new HttpError(400, e.message, { problems: e.problems });
       throw e;
@@ -669,6 +680,73 @@ export class LoanService {
   /** Remove one extra payment. Every other one, and every reconciled month, stays as it is. */
   deleteExtraPayment(id: number) {
     if (!this.store.deleteExtraPayment(id)) throw new HttpError(404, 'That extra payment is not on file');
+    return this.state();
+  }
+
+  // --- what-if ------------------------------------------------------------------------
+
+  /**
+   * Try a monthly extra and/or a lump sum against the real schedule, from the
+   * next payment not yet paid. Read-only: nothing is saved.
+   * `{ monthlyExtra?, lumpSum?: { date, amount } | null, dates?: [] }`
+   */
+  whatIf(body: unknown): WhatIfResult {
+    const b = bodyOf(body);
+    const setup = this.requireSetup();
+    const monthlyExtra = b.monthlyExtra === undefined ? 0 : amountField(b, 'monthlyExtra', { allowZero: true });
+    let lumpSum: WhatIfInput['lumpSum'] = null;
+    if (b.lumpSum !== undefined && b.lumpSum !== null) {
+      const l = bodyOf(b.lumpSum);
+      lumpSum = { date: dateField(l, 'date'), amount: amountField(l, 'amount') };
+      if (lumpSum.date < setup.openDate) throw new HttpError(400, 'The lump sum has to be on or after the loan open date');
+    }
+    const today = this.today();
+    const dates = b.dates === undefined ? [1, 5, 10].map((y) => addYears(today, y)) : b.dates;
+    if (!Array.isArray(dates) || dates.length > 6 || !dates.every((d) => isValidISODate(d))) {
+      throw new HttpError(400, 'dates must be a list of up to 6 dates like 2030-01-01');
+    }
+    const fromPayment = this.nextUnpaid(setup);
+    try {
+      return whatIf(setup, this.options(), { monthlyExtra, fromPayment, lumpSum, dates: dates as ISODate[] }, this.asset(setup));
+    } catch (e) {
+      if (e instanceof SetupError) throw new HttpError(400, e.message, { problems: e.problems });
+      throw e;
+    }
+  }
+
+  /** The next payment not yet reconciled, skipped or made before tracking: where a new standing extra starts. */
+  private nextUnpaid(setup: LoanSetup): number {
+    const paid = this.paidSet();
+    const row = this.build(setup).rows.find((r) => !r.beforeTracking && !r.skipped && !paid.has(r.payment) && !this.store.getMonth(r.payment));
+    if (!row) throw new HttpError(409, 'Every payment is already made');
+    return row.payment;
+  }
+
+  /**
+   * "Make this my standing extra": pay `amount` more with every payment from
+   * the next unpaid one on, on top of any standing extra already in place.
+   * Reconciled months keep what they paid. Undo with deleteStandingExtra.
+   */
+  setStandingExtra(body: unknown) {
+    const b = bodyOf(body);
+    const amount = amountField(b, 'amount');
+    const setup = this.requireSetup();
+    const fromPayment = this.nextUnpaid(setup);
+    const existing = this.store.listAdjustments().map((a) => a.adjustment);
+    this.root.transaction(() => {
+      this.store.addAdjustment({ kind: 'standingExtra', fromPayment, amount: standingExtraAt(setup, existing, fromPayment) + amount }, null);
+      this.build(setup);
+    });
+    return this.state();
+  }
+
+  /** Remove a standing extra set from the what-if screen (one set while reconciling goes with its month). */
+  deleteStandingExtra(id: number) {
+    const found = this.store.listAdjustments().find((a) => a.id === id);
+    if (!found || found.adjustment.kind !== 'standingExtra' || found.sourcePayment !== null) {
+      throw new HttpError(404, 'That standing extra is not on file');
+    }
+    this.store.deleteAdjustment(id);
     return this.state();
   }
 

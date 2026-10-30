@@ -19,8 +19,9 @@ import { ReconcileView } from './ReconcileView.js';
 import { ScheduleView } from './ScheduleView.js';
 import { SetupForm } from './SetupForm.js';
 import { SummaryCards } from './SummaryCards.js';
+import { WhatIfView } from './WhatIfView.js';
 
-type Tab = 'overview' | 'equity' | 'escrow' | 'reconcile' | 'schedule' | 'details' | 'setup';
+type Tab = 'overview' | 'equity' | 'escrow' | 'reconcile' | 'schedule' | 'whatif' | 'details' | 'setup';
 
 const REMEMBER = 'ab-asset-tracker:loan';
 
@@ -262,6 +263,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
     ...(modules.escrow ? [{ id: 'escrow' as const, label: 'Escrow' }] : []),
     { id: 'reconcile', label: 'Reconcile' },
     { id: 'schedule', label: 'Schedule' },
+    { id: 'whatif', label: 'What if' },
     { id: 'details', label: 'Details' },
     { id: 'setup', label: 'Setup' },
   ];
@@ -425,6 +427,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
         />
       )}
 
+      {shown === 'whatif' && s && <WhatIfView state={state} client={client} onState={setState} />}
       {shown === 'equity' && state.analysis && <EquityView state={state} client={client} onState={setState} />}
       {shown === 'escrow' && state.analysis && <EscrowView state={state} client={client} onState={setState} />}
       {shown === 'details' && <DetailsView state={state} client={client} onState={setState} />}

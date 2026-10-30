@@ -128,3 +128,13 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **Extras dated on or before the last payment made before tracking are ignored, and the service refuses them.** The statement balance used as the starting point already includes them.
 - **An extra that would overpay the loan is refused.** The schedule caps extras at the balance; refusing at entry keeps the stored amount equal to what was applied.
 - **Extras can come from Actual (any unused payment in the loan's category near the month) or be entered by hand.** An extra paid from another account or category still counts. A bank transaction can be used once, as a regular match or as one extra.
+
+### Payoff date and what-if
+
+- **Real extra principal already moved the payoff date in v0.1.0; v0.2.0 adds tests that pin it, for extras inside the regular payment and for extras of their own, along with the PMI request date.** Nothing to fix.
+- **What-if runs on the server against the saved schedule, with every recorded payment, extra, skip and lock, and writes nothing.** The answer starts from where the loan really is, and a test checks the database is unchanged after it.
+- **The monthly extra applies from the next payment not yet matched or skipped; the lump sum is a hypothetical extra payment on its own date.** It uses the same engine code as a real standing extra and a real extra payment, so tests prove "try it" and "make it real" give the same payoff to the cent.
+- **The headline is the payoff date and how much sooner, then what's owed and equity on chosen dates; interest is shown smaller.** As asked: interest stays available but isn't the headline.
+- **Comparison dates default to 1, 5 and 10 years from today, and can be changed.** Short, medium and long horizons without typing.
+- **"Make this my standing extra" records a standing-extra change from the next unpaid payment, on top of any standing extra already in place, and can be removed from the same screen.** It uses the adjustment the reconcile flow already writes, so nothing new is stored; reconciled months keep what they paid. The lump sum is never saved: when it's really paid, it's recorded as an extra payment.
+- **Equity on a future date uses the asset's projected curve when it has one, otherwise its value today.** The same value on both plans, so the difference is only what's owed.

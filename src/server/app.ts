@@ -188,6 +188,17 @@ export function createApp(deps: AppDeps) {
   loan.delete('/extra-payments/:id', (req, res) => {
     res.json(one(req).deleteExtraPayment(idParam(req)));
   });
+  loan.post('/what-if', async (req, res) => {
+    const svc = one(req);
+    await service.refreshLinked();
+    res.json(svc.whatIf(req.body));
+  });
+  loan.post('/standing-extra', (req, res) => {
+    res.status(201).json(one(req).setStandingExtra(req.body));
+  });
+  loan.delete('/standing-extra/:id', (req, res) => {
+    res.json(one(req).deleteStandingExtra(idParam(req)));
+  });
   loan.put('/pmi/removal', (req, res) => {
     res.json(one(req).setPmiRemoval(req.body));
   });
