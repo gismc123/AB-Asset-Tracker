@@ -55,6 +55,12 @@ export function addDays(date: ISODate, days: number): ISODate {
   return formatISODate(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
 }
 
+/** The same day `years` later (Feb 29 becomes Feb 28 in a common year). */
+export function addYears(date: ISODate, years: number): ISODate {
+  const { y, m, d } = parseISODate(date);
+  return formatISODate(y + years, m, Math.min(d, daysInMonth(y + years, m)));
+}
+
 /** Today's date in the process timezone (set TZ in Docker). */
 export function todayISO(now: Date = new Date()): ISODate {
   return formatISODate(now.getFullYear(), now.getMonth() + 1, now.getDate());

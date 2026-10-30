@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AssetKind, PeriodBasis, PeriodBreakouts, PeriodTotals, ValueTrend } from '../../engine/index.js';
-import type { AssetRecord, LoanClient, StateView } from '../api.js';
+import { ACCOUNT_VALUE_SOURCE, type AssetKind, type PeriodBasis, type PeriodBreakouts, type PeriodTotals, type ValueTrend } from '../../engine/index.js';
+import type { AssetRecord, BudgetAccount, LoanClient, StateView } from '../api.js';
 import { centsToInput, date, parseDollars, percent } from '../format.js';
 import { ASSET_KIND_LABEL, LOAN_TYPE_INFO, VALUE_SOURCES } from '../loanTypes.js';
 import { Amt } from './Amt.js';
@@ -184,10 +184,13 @@ function EquityParts({ state, kind }: { state: StateView; kind: AssetKind }) {
     { label: 'Extra before tracking', note: 'Starting balance vs. the original schedule', value: e.parts.extraBeforeTracking },
     {
       label: 'Value change',
-      note: e.isEstimate ? `Since purchase, per ${e.homeValueSource.toLowerCase()}` : 'Add a newer value to include it',
+      note: e.isEstimate
+        ? `Since purchase, per ${e.homeValueSource === ACCOUNT_VALUE_SOURCE ? 'your Actual account' : e.homeValueSource.toLowerCase()}`
+        : 'Add a newer value to include it',
       value: e.parts.marketChange,
       always: !e.isEstimate,
     },
+    { label: 'Fees added', note: 'One-off fees the lender added to what you owe', value: e.parts.feesAdded ?? 0 },
     { label: 'Skipped payments', note: 'Interest added, or payments deferred or not yet caught up', value: e.parts.skipped },
   ].filter((p, i) => i < 2 || p.value !== 0 || ('always' in p && p.always));
   const max = Math.max(1, ...parts.map((p) => Math.abs(p.value)));
@@ -267,9 +270,12 @@ function AssetValues({ state, client, onState, kind }: Props & { kind: AssetKind
   return (
     <div className="mt-card">
       <h3>{ASSET_KIND_LABEL[kind]} value</h3>
+      {asset && <ValueSource state={state} client={client} onState={onState} asset={asset} />}
       {values.length === 0 ? (
         <p className="mt-kpi-note" style={{ marginTop: 0 }}>
-          Equity uses the original value until you add a newer one. The newest value is used.
+          {state.assetValue?.active === 'account'
+            ? "Values you enter here are used only when the account can't be read."
+            : 'Equity uses the original value until you add a newer one. The newest value is used.'}
         </p>
       ) : (
         <table className="mt-data" style={{ marginBottom: 12 }}>
@@ -278,7 +284,7 @@ function AssetValues({ state, client, onState, kind }: Props & { kind: AssetKind
               <tr key={v.id}>
                 <td className="l">
                   {date(v.date)}
-                  {i === 0 && <span className="mt-pill paid" style={{ marginLeft: 6 }}>In use</span>}
+                  {i === 0 && state.assetValue?.active !== 'account' && <span className="mt-pill paid" style={{ marginLeft: 6 }}>In use</span>}
                 </td>
                 <td className="l muted">{v.source}</td>
                 <td>
@@ -327,6 +333,112 @@ function AssetValues({ state, client, onState, kind }: Props & { kind: AssetKind
       {kind === 'home' && state.setup && state.summary?.pmi.hasPmi && (
         <div className="mt-kpi-note" style={{ marginTop: 10 }}>
           PMI dates on the Overview always use the original value, as lenders do.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Where the value comes from: the values entered here, or the balance of an
+ * account in Actual (an off-budget account kept up to date some other way).
+ * The values entered here stay as the fallback.
+ */
+function ValueSource({ state, client, onState, asset }: Props & { asset: AssetRecord }) {
+  const source = state.assetValue;
+  const [accounts, setAccounts] = useState<BudgetAccount[] | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [choice, setChoice] = useState(asset.actualAccountId ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const pick = async () => {
+    setPicking(true);
+    setError(null);
+    try {
+      setAccounts(await client.accounts());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const save = async (accountId: string | null) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onState(await client.setAssetAccount(asset.id, accountId));
+      setPicking(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Off-budget accounts first: that's where values are usually kept.
+  const listed = (accounts ?? [])
+    .filter((a) => !a.closed || a.id === asset.actualAccountId)
+    .sort((a, b) => Number(b.offBudget) - Number(a.offBudget) || a.name.localeCompare(b.name));
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {source?.active === 'account' && source.account && (
+        <div className={`mt-note ${source.problem ? 'warn' : 'good'}`}>
+          Value from your Actual account <b>{source.account.name}</b>: <Amt cents={source.account.balance ?? 0} whole />, as of{' '}
+          {date(source.account.asOf)}.
+          {source.problem ? ` ${source.problem} This is the balance read earlier.` : ' The values below are the fallback.'}
+        </div>
+      )}
+      {source?.active === 'entered' && source.account && (
+        <div className="mt-note warn">
+          Linked to an Actual account{source.account.name ? <> (<b>{source.account.name}</b>)</> : null}, but it can't be used right now: {source.problem}{' '}
+          The values entered here are used instead.
+        </div>
+      )}
+      {!picking ? (
+        <div className="mt-row" style={{ marginTop: 8 }}>
+          <span className="mt-kpi-note" style={{ marginTop: 0 }}>
+            {asset.actualAccountId ? 'Source: Actual account.' : 'Source: the values entered here.'}
+          </span>
+          <button type="button" className="mt-btn link" onClick={pick}>
+            {asset.actualAccountId ? 'Change' : "Use an Actual account's balance"}
+          </button>
+          {asset.actualAccountId && (
+            <button type="button" className="mt-btn link" disabled={busy} onClick={() => save(null)}>
+              Stop using it
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="mt-inline-form" style={{ marginTop: 8 }}>
+          <div className="mt-field">
+            <label htmlFor="mt-value-account">Use this account's balance as the value</label>
+            <select id="mt-value-account" className="mt-select" style={{ width: '100%', minWidth: 0 }} value={choice} onChange={(e) => setChoice(e.target.value)}>
+              <option value="">Choose an account…</option>
+              {listed.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                  {a.offBudget ? ' (off budget)' : ''}
+                  {a.closed ? ' (closed)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button type="button" className="mt-btn primary" disabled={busy || !choice} onClick={() => save(choice)}>
+            Use it
+          </button>
+          <button type="button" className="mt-btn link" onClick={() => setPicking(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {picking && (
+        <p className="mt-kpi-note">
+          Read only: the tracker reads the account's balance each time you open the loan and never changes the account. Usually an
+          off-budget account whose balance you (or a helper tool) keep at the asset's value.
+        </p>
+      )}
+      {error && (
+        <div className="mt-note bad" style={{ marginTop: 8 }} role="alert">
+          {error}
         </div>
       )}
     </div>
@@ -473,7 +585,8 @@ const ROWS: { key: keyof PeriodTotals; label: string; color?: string }[] = [
   { key: 'interest', label: 'Interest', color: 'var(--s-interest)' },
   { key: 'pmi', label: 'PMI', color: 'var(--s-pmi)' },
   { key: 'escrow', label: 'Escrow', color: 'var(--s-escrow)' },
-  { key: 'fees', label: 'Yearly fees' },
+  { key: 'fees', label: 'Fees' },
+  { key: 'feesAdded', label: 'Fees added to the balance' },
   { key: 'deferredRepaid', label: 'Deferred balance repaid' },
 ];
 

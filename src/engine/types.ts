@@ -67,22 +67,50 @@ export interface LoanModules {
  */
 export type InterestMethod = 'monthly' | 'daily';
 
-/** A cost paid once when the loan was opened, such as a processing fee or credit insurance. */
+/**
+ * A cost charged once, such as a processing fee, credit insurance or a
+ * late charge. Without a date it was paid when the loan was opened.
+ *
+ * - `financed`: added to the amount borrowed when the loan was opened, so
+ *   it's already in `originalAmount`. Informational.
+ * - `addedToBalance` (needs a date after the open date): added to the
+ *   balance on that date; interest accrues on it and it's paid off with the
+ *   regular payments, so the loan runs a little longer.
+ * - neither: paid separately, up front or on its date. Shown on the
+ *   schedule and in the totals, but never part of the balance or of the
+ *   payment the bank transaction is matched against.
+ */
 export interface OneOffFee {
   label: string;
   amount: Cents;
-  /** True when the fee was added to the amount borrowed instead of paid up front. Informational. */
   financed: boolean;
+  /** When it was charged. Missing or null: when the loan was opened. */
+  date?: ISODate | null;
+  addedToBalance?: boolean;
+}
+
+/** A one-off fee that falls inside the schedule, as applied to a row. */
+export interface DatedFee {
+  label: string;
+  date: ISODate;
+  amount: Cents;
+  addedToBalance: boolean;
 }
 
 /**
  * A fee charged once a year with the first payment of each loan year
  * (payments 1, 13, 25 and so on), as a percent of the original amount or of
- * the balance at that payment. It is part of the payment total.
+ * the balance at that payment.
  */
 export interface YearlyFee {
   basis: 'original' | 'balance';
   percent: number;
+  /**
+   * `payment` (missing = this): part of the payment total, so the bank
+   * transaction includes it. `separately`: charged on its own; on the
+   * schedule and in the totals, but not expected in the payment.
+   */
+  collect?: 'payment' | 'separately';
 }
 
 /** A payoff amount quoted by the lender, used instead of the estimate until it expires. */
@@ -190,6 +218,19 @@ export type Adjustment =
 
 export type AdjustmentKind = Adjustment['kind'];
 
+/**
+ * Extra principal paid in a transaction of its own, on its own date, apart
+ * from the regular payment. It lowers the balance from that date: on a
+ * monthly-interest loan from the next payment's interest, on a
+ * daily-interest loan from the day it was paid.
+ */
+export interface ExtraPayment {
+  /** Its id in the database; null for a hypothetical one (what-if). */
+  id: number | null;
+  date: ISODate;
+  amount: Cents;
+}
+
 export interface ScheduleRow {
   payment: number;
   dueDate: ISODate;
@@ -204,7 +245,16 @@ export interface ScheduleRow {
    */
   extraPrincipal: Cents;
   pennyOffset: Cents;
-  /** Total principal paid this month: scheduled + extra + offset. */
+  /**
+   * Extra principal paid in transactions of their own and applied with this
+   * row: on a monthly-interest loan, those dated from this due date up to
+   * the next; on a daily-interest loan, those dated in this interest period.
+   * Part of `principal`, not of `total` (they are separate transactions).
+   */
+  extraPayments: Cents;
+  /** Each of those payments, with the amount applied (less than paid only when it would overpay the loan). */
+  extraPaymentList: ExtraPayment[];
+  /** Total principal paid this month: scheduled + extra + offset + extra payments. */
   principal: Cents;
   /** Required P&I for this month (the last payment is usually smaller). */
   principalAndInterest: Cents;
@@ -212,11 +262,21 @@ export interface ScheduleRow {
   escrow: Cents;
   /** Yearly fee charged with this payment (see `YearlyFee`). */
   fee: Cents;
-  /** Everything that leaves your account: P&I + extra + offset + PMI + escrow + fee. */
+  /** Yearly fee charged separately at this payment. Not part of `total`. */
+  separateFee: Cents;
+  /** One-off fees dated in this row and paid separately. Not part of `total` or the balance. */
+  oneOffFees: Cents;
+  /** One-off fees dated in this row and added to the balance. */
+  feesAdded: Cents;
+  /** Each dated one-off fee in this row. */
+  oneOffFeeList: DatedFee[];
+  /** The payment the bank transaction should match: P&I + extra + offset + PMI + escrow + fee. */
   total: Cents;
   endingBalance: Cents;
   /** True when the row came from locked, reconciled actual amounts. */
   locked: boolean;
+  /** Interest and principal come from the lender's imported table, not the calculation. */
+  fromBank: boolean;
   /** Made before tracking began (see `StartingPoint`): amounts are the original schedule's. */
   beforeTracking: boolean;
   /** Set when this payment is skipped. A skipped row has `total` 0. */
@@ -233,8 +293,16 @@ export interface ScheduleRow {
   catchUp: PaymentParts | null;
 }
 
-/** Amounts frozen when a month is reconciled as paid. */
-export type LockedPayment = Omit<ScheduleRow, 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking'>;
+/**
+ * Amounts frozen when a month is reconciled as paid: the regular payment
+ * only. Extra payments of their own are applied on top, so adding or
+ * removing one never touches a reconciled month.
+ */
+export type LockedPayment = Omit<
+  ScheduleRow,
+  | 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking' | 'fromBank'
+  | 'extraPayments' | 'extraPaymentList' | 'separateFee' | 'oneOffFees' | 'feesAdded' | 'oneOffFeeList'
+>;
 
 export interface PmiMilestone {
   /** Balance at or below which the milestone is reached. */
@@ -278,8 +346,12 @@ export interface Schedule {
     principal: Cents;
     pmi: Cents;
     escrow: Cents;
-    /** Yearly fees on the schedule. One-off fees are in the setup. */
+    /** Yearly fees on the schedule, in the payment or charged separately. */
     fees: Cents;
+    /** Dated one-off fees on the schedule paid separately (undated ones are in the setup). */
+    oneOffFees: Cents;
+    /** Dated one-off fees added to the balance. */
+    feesAdded: Cents;
     payments: number;
     capitalizedInterest: Cents;
     deferred: Cents;

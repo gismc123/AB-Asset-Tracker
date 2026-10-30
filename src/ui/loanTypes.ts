@@ -21,6 +21,12 @@ export const LOAN_TYPE_INFO: Record<LoanType, { label: string; nickname: string;
     blurb: 'An installment loan with no asset behind it. Tracks the balance, interest and payoff.',
     assetKind: null,
   },
+  student: {
+    label: 'Student loan',
+    nickname: 'Student loan',
+    blurb: 'A federal or private student loan, with no asset behind it. Tracks the balance, interest and payoff.',
+    assetKind: null,
+  },
 };
 
 export const ASSET_KIND_LABEL: Record<AssetKind, string> = { home: 'Home', vehicle: 'Vehicle', other: 'Asset' };
@@ -48,6 +54,8 @@ export const TYPE_ICON_SVG: Record<LoanType, string> = {
     '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M5.3 4.5A2 2 0 0 1 7.1 3.4h5.8a2 2 0 0 1 1.8 1.1L16.3 8H17a1 1 0 0 1 1 1v4.5a1 1 0 0 1-1 1h-.5v1.3a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1.3h-7v1.3a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1.3H3a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h.7l1.6-3.5ZM5.6 8h8.8l-1.2-2.7a.5.5 0 0 0-.4-.3H7.2a.5.5 0 0 0-.4.3L5.6 8Zm-.4 2.3a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Zm9.6 0a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"/></svg>',
   personal:
     '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M3.5 5A2.5 2.5 0 0 1 6 2.5h8A2.5 2.5 0 0 1 16.5 5v.6A2.5 2.5 0 0 1 18 7.9v6.6a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 2 14.5V7.5A2.5 2.5 0 0 1 3.5 5Zm1.5.5h9.5V5a.5.5 0 0 0-.5-.5H6a.5.5 0 0 0-.5.5v.5Zm9 5.5a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"/></svg>',
+  student:
+    '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M9.6 2.6a1 1 0 0 1 .8 0l8.5 3.8a.6.6 0 0 1 0 1.1l-8.5 3.8a1 1 0 0 1-.8 0L3 8.4V12a.8.8 0 0 1-1.6 0V7.6a.6.6 0 0 1 .3-.5l7.9-4.5ZM5 10.6l4.6 2.1a1 1 0 0 0 .8 0l4.6-2.1V14c0 1.4-2.2 3-5 3s-5-1.6-5-3v-3.4Z"/></svg>',
 };
 
 /** The sidebar item's own icon: a stack of coins, neutral across loan types. */

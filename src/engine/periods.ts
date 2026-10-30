@@ -8,12 +8,15 @@ import type { Cents, ISODate, ScheduleRow } from './types.js';
 export interface PeriodTotals {
   /** Regular principal (scheduled principal plus any rounding offset). */
   principal: Cents;
+  /** Extra principal, in the regular payment or in payments of its own (dated by their own date). */
   extraPrincipal: Cents;
   interest: Cents;
   pmi: Cents;
   escrow: Cents;
-  /** Yearly fees. */
+  /** Fees paid: yearly (in the payment or separately) and dated one-off fees paid separately. */
   fees: Cents;
+  /** One-off fees added to the balance (owed, not paid yet). */
+  feesAdded: Cents;
   /** Deferred (skipped) payments repaid with the final payment. */
   deferredRepaid: Cents;
   /**
@@ -21,7 +24,7 @@ export interface PeriodTotals {
    * and escrow above; shown separately for reference.
    */
   catchUp: Cents;
-  /** Everything paid: principal + extra + interest + PMI + escrow + fees + deferred repaid. */
+  /** Everything paid: principal + extra (with extra payments of their own) + interest + PMI + escrow + fees + deferred repaid. */
   total: Cents;
   /** Payments made (skipped months not counted). */
   payments: number;
@@ -63,6 +66,7 @@ export function emptyTotals(): PeriodTotals {
     pmi: 0,
     escrow: 0,
     fees: 0,
+    feesAdded: 0,
     deferredRepaid: 0,
     catchUp: 0,
     total: 0,
@@ -74,6 +78,10 @@ export function emptyTotals(): PeriodTotals {
 }
 
 function add(t: PeriodTotals, r: ScheduleRow) {
+  // Charged on their own, so they count even in a skipped month.
+  t.fees += r.separateFee + r.oneOffFees;
+  t.total += r.separateFee + r.oneOffFees;
+  t.feesAdded += r.feesAdded;
   if (r.skipped) {
     t.skipped += 1;
     t.capitalizedInterest += r.capitalizedInterest;
@@ -138,6 +146,18 @@ export function periodBreakouts(
       if (p === periods.loanToDate) {
         if (when <= p.end) add(p.totals, r);
       } else if (when >= p.start && when <= p.end) add(p.totals, dated);
+    }
+  }
+  // Extra payments of their own count on the day they were made, whatever
+  // the state of the month they are applied with.
+  for (const r of rows) {
+    for (const e of r.extraPaymentList) {
+      for (const p of [...Object.values(periods), fullLoan]) {
+        if (p === fullLoan || (e.date <= p.end && (p === periods.loanToDate || e.date >= p.start))) {
+          p.totals.extraPrincipal += e.amount;
+          p.totals.total += e.amount;
+        }
+      }
     }
   }
   return { basis, ...periods, fullLoan };

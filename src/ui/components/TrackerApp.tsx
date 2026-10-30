@@ -5,9 +5,12 @@ import { date } from '../format.js';
 import { valueScreenLabel } from '../loanTypes.js';
 import { AddLoanWizard } from './AddLoanWizard.js';
 import { Amt } from './Amt.js';
+import { BalanceCheckNote, BalanceCheckSettings } from './BalanceCheckView.js';
 import { BackupView } from './BackupView.js';
+import { BankTableView } from './BankTableView.js';
 import { BalanceChart } from './BalanceChart.js';
 import { DetailsView } from './DetailsView.js';
+import { EffectiveRateNote } from './EffectiveRateNote.js';
 import { EquityView } from './EquityView.js';
 import { EscrowView } from './EscrowView.js';
 import { LoanPicker, type PickerScreen } from './LoanPicker.js';
@@ -19,8 +22,9 @@ import { ReconcileView } from './ReconcileView.js';
 import { ScheduleView } from './ScheduleView.js';
 import { SetupForm } from './SetupForm.js';
 import { SummaryCards } from './SummaryCards.js';
+import { WhatIfView } from './WhatIfView.js';
 
-type Tab = 'overview' | 'equity' | 'escrow' | 'reconcile' | 'schedule' | 'details' | 'setup';
+type Tab = 'overview' | 'equity' | 'escrow' | 'reconcile' | 'schedule' | 'whatif' | 'details' | 'setup';
 
 const REMEMBER = 'ab-asset-tracker:loan';
 
@@ -262,6 +266,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
     ...(modules.escrow ? [{ id: 'escrow' as const, label: 'Escrow' }] : []),
     { id: 'reconcile', label: 'Reconcile' },
     { id: 'schedule', label: 'Schedule' },
+    { id: 'whatif', label: 'What if' },
     { id: 'details', label: 'Details' },
     { id: 'setup', label: 'Setup' },
   ];
@@ -331,6 +336,12 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
         <>
           <SetupForm type={state.loan.type} initial={state.setup} hasReconciled={!!s?.rows.some((r) => r.status === 'paid')} onSave={saveSetup} />
           <div className="mt-gap" />
+          {state.setup && (
+            <>
+              <BalanceCheckSettings state={state} client={client} onState={setState} />
+              <div className="mt-gap" />
+            </>
+          )}
           <LoanSettings loan={state.loan} onRename={onRename} onArchive={onArchive} onDelete={onDelete} />
         </>
       )}
@@ -345,6 +356,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
                 : 'Set up a catch-up plan from the missed month in Reconcile.'}
             </div>
           )}
+          {state.balanceCheck && <BalanceCheckNote check={state.balanceCheck} />}
           <SummaryCards summary={state.summary} />
           <div className="mt-gap" />
           <div className="mt-grid mt-two">
@@ -365,8 +377,12 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
               <div className="mt-row" style={{ marginTop: 10, color: 'var(--muted)' }}>
                 Total interest <Amt cents={s.totals.interest} whole />
                 {modules.pmi && <> · PMI <Amt cents={s.totals.pmi} whole /></>}
-                {s.totals.fees > 0 && <> · fees <Amt cents={s.totals.fees} whole /></>} · payoff {date(s.rows.at(-1)?.dueDate, 'month')}
+                {s.totals.fees + s.totals.oneOffFees + s.totals.feesAdded > 0 && (
+                  <> · fees <Amt cents={s.totals.fees + s.totals.oneOffFees + s.totals.feesAdded} whole /></>
+                )}
+                {' · '}payoff {date(s.rows.at(-1)?.dueDate, 'month')}
               </div>
+              {state.analysis?.effectiveRate && <EffectiveRateNote rate={state.analysis.effectiveRate} />}
             </div>
             {modules.pmi ? (
               <PmiCountdown state={state} client={client} onState={setState} />
@@ -399,6 +415,8 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
           client={client}
           rows={s.rows}
           adjustments={state.adjustments}
+          extraPayments={state.extraPayments}
+          daily={state.setup.interestMethod === 'daily'}
           modules={modules}
           payment={Math.min(payment, s.rows.length)}
           onPaymentChange={setPayment}
@@ -412,8 +430,19 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
         />
       )}
 
-      {shown === 'schedule' && s && <ScheduleView rows={s.rows} modules={modules} currentPayment={s.currentPayment} onOpen={openMonth} />}
+      {shown === 'schedule' && s && <BankTableView state={state} client={client} onState={setState} />}
+      {shown === 'schedule' && s && (
+        <ScheduleView
+          rows={s.rows}
+          modules={modules}
+          currentPayment={s.currentPayment}
+          onOpen={openMonth}
+          onAddExtra={openMonth}
+          onRemoveExtra={async (id) => setState(await client.deleteExtraPayment(id))}
+        />
+      )}
 
+      {shown === 'whatif' && s && <WhatIfView state={state} client={client} onState={setState} />}
       {shown === 'equity' && state.analysis && <EquityView state={state} client={client} onState={setState} />}
       {shown === 'escrow' && state.analysis && <EscrowView state={state} client={client} onState={setState} />}
       {shown === 'details' && <DetailsView state={state} client={client} onState={setState} />}

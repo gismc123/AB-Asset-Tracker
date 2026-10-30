@@ -247,6 +247,91 @@ export const MIGRATIONS: Migration[] = [
       db.exec(FINISH_MULTI_LOAN);
     },
   },
+  {
+    version: 3,
+    description: 'Student loans: allow loan type student',
+    up(db) {
+      const sql = (db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'loans'`).get() as { sql: string }).sql;
+      if (sql.includes(`'student'`)) return;
+      // SQLite can't change a CHECK constraint in place, so the table is
+      // rebuilt as its documented procedure says. Foreign keys are off while
+      // migrations run, so dropping the old table cascades nothing, and the
+      // other tables' references point at the new one once it is renamed.
+      const before = count(db, 'loans');
+      const seq = db.prepare(`SELECT seq FROM sqlite_sequence WHERE name = 'loans'`).get() as { seq: number } | undefined;
+      db.exec(`
+        CREATE TABLE loans_v3 (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          nickname   TEXT NOT NULL,
+          type       TEXT NOT NULL CHECK (type IN ('mortgage', 'auto', 'personal', 'student')),
+          created_at TEXT NOT NULL,
+          archived   INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))
+        );
+        INSERT INTO loans_v3 (id, nickname, type, created_at, archived) SELECT id, nickname, type, created_at, archived FROM loans;
+        DROP TABLE loans;
+        ALTER TABLE loans_v3 RENAME TO loans;
+      `);
+      if (count(db, 'loans') !== before) throw new Error('Migration 3 copied a different number of loans than it found');
+      // Keep AUTOINCREMENT's high-water mark, so the id of a deleted loan is never reused.
+      if (seq) {
+        db.prepare(`DELETE FROM sqlite_sequence WHERE name = 'loans'`).run();
+        db.prepare(`INSERT INTO sqlite_sequence (name, seq) VALUES ('loans', ?)`).run(seq.seq);
+      }
+    },
+  },
+  {
+    version: 4,
+    description: "Asset value from an Actual account's balance: assets.actual_account_id",
+    up(db) {
+      if (!columns(db, 'assets').includes('actual_account_id')) db.exec(`ALTER TABLE assets ADD COLUMN actual_account_id TEXT`);
+    },
+  },
+  {
+    version: 5,
+    description: 'Extra principal paid in transactions of their own: extra_payments',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS extra_payments (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          loan_id           INTEGER NOT NULL REFERENCES loans (id) ON DELETE CASCADE,
+          date              TEXT NOT NULL,
+          amount            INTEGER NOT NULL CHECK (amount > 0),
+          transaction_id    TEXT,
+          transaction_payee TEXT,
+          note              TEXT NOT NULL DEFAULT '',
+          created_at        TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS extra_payments_loan ON extra_payments (loan_id, date);
+        CREATE UNIQUE INDEX IF NOT EXISTS extra_payments_transaction ON extra_payments (loan_id, transaction_id) WHERE transaction_id IS NOT NULL;
+      `);
+    },
+  },
+  {
+    version: 6,
+    description: "A lender's amortization table: bank_schedule",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS bank_schedule (
+          loan_id        INTEGER NOT NULL REFERENCES loans (id) ON DELETE CASCADE,
+          payment        INTEGER NOT NULL CHECK (payment >= 1),
+          due_date       TEXT,
+          payment_amount INTEGER,
+          principal      INTEGER NOT NULL CHECK (principal >= 0),
+          interest       INTEGER NOT NULL CHECK (interest >= 0),
+          balance        INTEGER,
+          imported_at    TEXT NOT NULL,
+          PRIMARY KEY (loan_id, payment)
+        );
+      `);
+    },
+  },
+  {
+    version: 7,
+    description: "Balance cross-check with an Actual loan account: loan_settings.balance_account_id",
+    up(db) {
+      if (!columns(db, 'loan_settings').includes('balance_account_id')) db.exec(`ALTER TABLE loan_settings ADD COLUMN balance_account_id TEXT`);
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)!.version;

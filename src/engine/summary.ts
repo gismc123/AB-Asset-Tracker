@@ -1,5 +1,15 @@
 import { modulesOf } from './amortize.js';
-import { currentValue, hasProjection, homeAssetFor, latestValue, projectedValue, type Asset, type AssetKind, type AssetValue } from './assets.js';
+import {
+  currentValue,
+  hasProjection,
+  homeAssetFor,
+  latestValue,
+  projectedValue,
+  type AccountReading,
+  type Asset,
+  type AssetKind,
+  type AssetValue,
+} from './assets.js';
 import { daysBetween } from './dates.js';
 import { dailyInterest } from './money.js';
 import type { Cents, ISODate, LoanSetup, PmiRemovalRule, Schedule, ScheduleRow } from './types.js';
@@ -83,6 +93,32 @@ export interface LoanSummary {
   };
 }
 
+/**
+ * The tracker's balance next to the balance of an Actual account that
+ * tracks the same loan. Loan accounts in Actual show what's owed as a
+ * negative balance, so the amounts are compared without their sign.
+ */
+export interface BalanceCheck {
+  account: AccountReading;
+  /** The tracker's principal balance today. */
+  tracker: Cents;
+  /** What Actual's account says is owed, or null when it couldn't be read. */
+  actual: Cents | null;
+  /** tracker - actual. */
+  difference: Cents | null;
+  matches: boolean | null;
+  /** Why it couldn't be compared, or why the account's balance may be out of date. */
+  problem: string | null;
+}
+
+export function checkBalance(tracker: Cents, account: AccountReading): BalanceCheck {
+  if (account.balance === null) {
+    return { account, tracker, actual: null, difference: null, matches: null, problem: account.error ?? 'Not read from Actual yet' };
+  }
+  const actual = Math.abs(account.balance);
+  return { account, tracker, actual, difference: tracker - actual, matches: tracker === actual, problem: account.error };
+}
+
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 10_000) / 100 : 0);
 
 /**
@@ -92,6 +128,21 @@ const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / who
  */
 export function settledRows(rows: readonly ScheduleRow[], paid: ReadonlySet<number>, today: ISODate): ScheduleRow[] {
   return rows.filter((r) => isPaid(r, paid) || (r.skipped !== null && r.dueDate <= today));
+}
+
+/**
+ * Extra payments made and fees added to the balance on or before `today`,
+ * in rows after the last settled one. The settled balance doesn't include
+ * them yet; the real balance does.
+ */
+export function notYetSettled(rows: readonly ScheduleRow[], lastSettled: ScheduleRow | null, today: ISODate): { extras: Cents; feesAdded: Cents } {
+  const from = lastSettled ? rows.indexOf(lastSettled) + 1 : 0;
+  const out = { extras: 0, feesAdded: 0 };
+  for (const r of rows.slice(from)) {
+    for (const e of r.extraPaymentList) if (e.date <= today) out.extras += e.amount;
+    for (const f of r.oneOffFeeList) if (f.addedToBalance && f.date <= today) out.feesAdded += f.amount;
+  }
+  return out;
 }
 
 /** Reconciled, or made before tracking began. */
@@ -139,7 +190,8 @@ export function summarize(
   const paidRows = rows.filter((r) => isPaid(r, paid));
   const lastPaid = paidRows.at(-1) ?? null;
   const lastSettled = settled.at(-1) ?? null;
-  const balance = lastSettled ? lastSettled.endingBalance : setup.originalAmount;
+  const pending = notYetSettled(rows, lastSettled, today);
+  const balance = (lastSettled ? lastSettled.endingBalance : setup.originalAmount) - pending.extras + pending.feesAdded;
   const deferredBalance = settled.reduce((sum, r) => sum + r.deferred - r.deferredRepaid, 0);
   const pastDue = settled.reduce((sum, r) => sum + r.pastDue - (r.catchUp?.total ?? 0), 0);
   const owed = balance + deferredBalance + pastDue;

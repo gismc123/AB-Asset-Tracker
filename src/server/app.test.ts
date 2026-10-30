@@ -4,7 +4,7 @@ import { createApp } from './app.js';
 import { actualTokenValidator } from './auth.js';
 import { Store } from './db.js';
 import { TrackerService } from './service.js';
-import { AUTO_SETUP, FakeSource, MORTGAGE_CATEGORY, SAMPLE_SETUP } from './testing.js';
+import { AUTO_SETUP, CAR_CATEGORY, FakeSource, MORTGAGE_CATEGORY, SAMPLE_SETUP, STUDENT_CATEGORY, STUDENT_SETUP } from './testing.js';
 
 const GOOD = 'good-token';
 const API = '/asset-tracker-api';
@@ -115,6 +115,52 @@ describe('HTTP API', () => {
 });
 
 describe('loans', () => {
+  it('runs auto, personal and student loans end to end: add, schedule, reconcile, equity, summary', async () => {
+    const svc = new TrackerService(new Store(':memory:'), source, () => '2025-06-15');
+    const a = createApp({ service: svc, validateToken: async (t) => t === GOOD, uiDir: '/nonexistent', summaryToken: 'summary-token-example-0123' });
+    const post = (body: unknown) => authed(request(a).post(`${API}/loans`).send(body as object));
+
+    const car = (await post({
+      nickname: 'Hatchback', type: 'auto', setup: AUTO_SETUP, categoryId: CAR_CATEGORY,
+      asset: { name: 'Sample hatchback', kind: 'vehicle', originalValue: 3_600_000, valueTrend: 'depreciating', trendRatePercent: 15 },
+    })).body;
+    const personal = (await post({ nickname: 'Kitchen', type: 'personal', setup: { ...AUTO_SETUP, termMonths: 36 }, categoryId: CAR_CATEGORY })).body;
+    const student = (await post({ nickname: 'Student loan', type: 'student', setup: STUDENT_SETUP, categoryId: STUDENT_CATEGORY })).body;
+
+    expect(car.state.asset).toMatchObject({ kind: 'vehicle', loanId: car.loan.id });
+    expect(car.state.analysis.equity).toMatchObject({ homeValue: 3_600_000 });
+    for (const s of [personal.state, student.state]) {
+      expect(s.asset).toBeNull();
+      expect(s.analysis.equity).toBeNull();
+      expect(s.setup.modules).toEqual({ pmi: false, escrow: false });
+      expect(s.schedule.rows.every((r: { pmi: number; escrow: number }) => r.pmi === 0 && r.escrow === 0)).toBe(true);
+    }
+    expect(student.loan.type).toBe('student');
+    expect(student.state.schedule.rows).toHaveLength(120);
+
+    // Reconcile the first payment of each; the student loan's is short, so only extra principal or rounding fit.
+    for (const [loan, cat, txn] of [[car, CAR_CATEGORY, 'c1'], [personal, CAR_CATEGORY, 'p1'], [student, STUDENT_CATEGORY, 's1']] as const) {
+      const first = loan.state.schedule.rows[0];
+      source.add(txn, first.dueDate, -(first.total + 2_500), cat);
+      const m = await authed(request(a).post(`${API}/loans/${loan.loan.id}/months/1/match`).send({ transactionId: txn }));
+      expect(m.body).toMatchObject({ status: 'flagged', suggestions: ['extraPrincipal'] });
+      expect((await authed(request(a).post(`${API}/loans/${loan.loan.id}/months/1/resolve`).send({ resolution: 'escrow' }))).status).toBe(400);
+      const r = await authed(request(a).post(`${API}/loans/${loan.loan.id}/months/1/resolve`).send({ resolution: 'extraPrincipal' }));
+      expect(r.body.schedule.rows[0]).toMatchObject({ status: 'paid', extraPrincipal: 2_500 });
+      expect(r.body.summary.balance).toBe(first.endingBalance - 2_500);
+    }
+
+    const summary = await request(a).get(`${API}/v1/summary`).set('authorization', 'Bearer summary-token-example-0123');
+    const byName = Object.fromEntries(summary.body.loans.map((l: { nickname: string }) => [l.nickname, l]));
+    expect(byName.Hatchback).toMatchObject({ type: 'auto', paymentNumber: 1, asset: { kind: 'vehicle' }, pmi: null });
+    expect(byName.Kitchen).toMatchObject({ type: 'personal', paymentNumber: 1, asset: null, equity: null, pmi: null });
+    expect(byName['Student loan']).toMatchObject({ type: 'student', paymentNumber: 1, totalPayments: 120, asset: null, equity: null, pmi: null });
+
+    const list = await authed(request(a).get(`${API}/loans`));
+    expect(list.body.map((l: { loan: { type: string } }) => l.loan.type)).toEqual(['auto', 'personal', 'student']);
+    expect((await post({ nickname: 'Boat', type: 'boat' })).status).toBe(400);
+  });
+
   it('lists, renames, archives and deletes loans', async () => {
     const home = await newLoan();
     const car = await newLoan({

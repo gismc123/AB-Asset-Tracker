@@ -1,11 +1,11 @@
-import type { Cents, EscrowKind, ISODate, LoanSetup, SkipMode } from '../engine/index.js';
-import type { CategoryGroup } from '../server/actual.js';
+import type { BankRow, Cents, EscrowKind, ISODate, LoanSetup, SkipMode, WhatIfResult } from '../engine/index.js';
+import type { BudgetAccount, CategoryGroup } from '../server/actual.js';
 import type { Backup, RestoreResult } from '../server/backup.js';
 import type { AssetInput, AssetRecord, LoanDetails, LoanRecord, LoanType } from '../server/db.js';
-import type { Candidate, LoanListItem, MatchResult, StateView } from '../server/service.js';
+import type { BankPreview, Candidate, LoanListItem, MatchResult, StateView } from '../server/service.js';
 import type { Resolution } from '../engine/index.js';
 
-export type { StateView, Candidate, MatchResult, CategoryGroup, LoanDetails, LoanListItem, LoanRecord, LoanType, AssetRecord, Backup, RestoreResult };
+export type { StateView, BankPreview, Candidate, MatchResult, CategoryGroup, BudgetAccount, LoanDetails, LoanListItem, LoanRecord, LoanType, AssetRecord, Backup, RestoreResult };
 
 export class ApiError extends Error {
   constructor(
@@ -66,7 +66,9 @@ export interface LoanClient {
   readonly loanId: number;
   state(): Promise<StateView>;
   saveSetup(setup: LoanSetup): Promise<StateView>;
-  saveSettings(categoryId: string | null): Promise<{ categoryId: string | null }>;
+  saveSettings(categoryId: string | null): Promise<{ categoryId: string | null; balanceAccountId: string | null }>;
+  /** Compare the balance with this Actual account's (null: stop comparing). */
+  setBalanceAccount(categoryId: string | null, accountId: string | null): Promise<StateView>;
   categories(): Promise<CategoryGroup[]>;
   candidates(payment: number, categoryId: string, wide?: boolean): Promise<Candidate[]>;
   match(payment: number, transactionId: string, categoryId: string): Promise<MatchResult>;
@@ -77,11 +79,31 @@ export interface LoanClient {
   unskip(payment: number): Promise<StateView>;
   setCatchUpPlan(payment: number, fromPayment: number, months: number): Promise<StateView>;
   clearCatchUpPlan(payment: number): Promise<StateView>;
+  /** Record extra principal paid in a transaction of its own: a bank transaction near payment `payment`, or one entered by hand. */
+  addExtraPayment(extra: { transactionId: string; payment: number; categoryId: string | null } | { date: ISODate; amount: Cents; note: string }): Promise<StateView>;
+  /** Remove one extra payment; the others stay. */
+  deleteExtraPayment(id: number): Promise<StateView>;
+  /** What importing these months from the lender's table would do. Saves nothing. */
+  previewBankSchedule(rows: BankRow[]): Promise<BankPreview>;
+  /** Save months from the lender's table (replacing the same months imported before). */
+  saveBankSchedule(rows: BankRow[]): Promise<StateView>;
+  /** Remove one imported month, or all of them. */
+  deleteBankSchedule(payment?: number): Promise<StateView>;
+  /** Try a monthly extra and/or a lump sum against the real schedule. Saves nothing. */
+  whatIf(input: { monthlyExtra: Cents; lumpSum: { date: ISODate; amount: Cents } | null; dates: ISODate[] }): Promise<WhatIfResult>;
+  /** Pay `amount` more with every payment from the next unpaid one on. */
+  setStandingExtra(amount: Cents): Promise<StateView>;
+  /** Remove a standing extra set from the what-if screen. */
+  deleteStandingExtra(id: number): Promise<StateView>;
   /** Record that PMI stopped from this payment on; replaces an earlier record. */
   setPmiRemoval(fromPayment: number): Promise<StateView>;
   clearPmiRemoval(): Promise<StateView>;
   /** Create the loan's asset, or update the one it has. */
   saveAsset(asset: AssetFields): Promise<StateView>;
+  /** The budget's accounts, to link one. */
+  accounts(): Promise<BudgetAccount[]>;
+  /** Use an Actual account's balance as the asset's value (null: the values entered here). */
+  setAssetAccount(assetId: number, accountId: string | null): Promise<StateView>;
   addAssetValue(assetId: number, value: { date: ISODate; value: Cents; source: string }): Promise<StateView>;
   deleteAssetValue(assetId: number, valueId: number): Promise<StateView>;
   addEscrowEntry(entry: { date: ISODate; kind: EscrowKind; amount: Cents; note: string }): Promise<StateView>;
@@ -89,7 +111,8 @@ export interface LoanClient {
   saveDetails(details: LoanDetails): Promise<StateView>;
 }
 
-export type AssetFields = Omit<AssetInput, 'loanId'>;
+/** An asset's own fields. Leaving out `actualAccountId` keeps the link it has. */
+export type AssetFields = Omit<AssetInput, 'loanId' | 'actualAccountId'> & { actualAccountId?: string | null };
 
 export interface NewLoan {
   nickname: string;
@@ -139,6 +162,10 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       state,
       saveSetup: (setup) => call('PUT', `${at}/setup`, setup),
       saveSettings: (categoryId) => call('PUT', `${at}/settings`, { categoryId }),
+      async setBalanceAccount(categoryId, balanceAccountId) {
+        await call('PUT', `${at}/settings`, { categoryId, balanceAccountId });
+        return state();
+      },
       categories: () => call('GET', '/categories'),
       candidates: (n, cat, wide) => call('GET', `${at}/months/${n}/candidates?categoryId=${q(cat)}${wide ? '&wide=1' : ''}`),
       match: (n, transactionId, categoryId) => call('POST', `${at}/months/${n}/match`, { transactionId, categoryId }),
@@ -149,12 +176,25 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       unskip: (n) => call('POST', `${at}/months/${n}/unskip`),
       setCatchUpPlan: (n, fromPayment, months) => call('PUT', `${at}/months/${n}/catch-up`, { fromPayment, months }),
       clearCatchUpPlan: (n) => call('DELETE', `${at}/months/${n}/catch-up`),
+      addExtraPayment: (extra) => call('POST', `${at}/extra-payments`, extra),
+      deleteExtraPayment: (id) => call('DELETE', `${at}/extra-payments/${id}`),
+      previewBankSchedule: (rows) => call('POST', `${at}/bank-schedule/preview`, { rows }),
+      saveBankSchedule: (rows) => call('PUT', `${at}/bank-schedule`, { rows }),
+      deleteBankSchedule: (n) => call('DELETE', n === undefined ? `${at}/bank-schedule` : `${at}/bank-schedule/${n}`),
+      whatIf: (input) => call('POST', `${at}/what-if`, input),
+      setStandingExtra: (amount) => call('POST', `${at}/standing-extra`, { amount }),
+      deleteStandingExtra: (id) => call('DELETE', `${at}/standing-extra/${id}`),
       setPmiRemoval: (fromPayment) => call('PUT', `${at}/pmi/removal`, { fromPayment }),
       clearPmiRemoval: () => call('DELETE', `${at}/pmi/removal`),
       async saveAsset(asset) {
         const current = (await state()).asset;
         if (current) await call('PATCH', `/assets/${current.id}`, asset);
         else await call('POST', '/assets', { ...asset, loanId });
+        return state();
+      },
+      accounts: () => call('GET', '/accounts'),
+      async setAssetAccount(assetId, actualAccountId) {
+        await call('PATCH', `/assets/${assetId}`, { actualAccountId });
         return state();
       },
       async addAssetValue(assetId, v) {

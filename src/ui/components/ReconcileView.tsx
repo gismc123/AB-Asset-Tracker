@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { MAX_PENNY_OFFSET, type LoanModules, type Resolution, type SkipMode } from '../../engine/index.js';
 import type { MonthView, StateView } from '../../server/service.js';
 import type { Candidate, CategoryGroup, LoanClient } from '../api.js';
-import { date, money } from '../format.js';
+import { date, money, parseDollars } from '../format.js';
 import { PaymentBreakdown } from './PaymentBreakdown.js';
 import { StatusPill } from './ScheduleView.js';
 import { Amt } from './Amt.js';
@@ -12,6 +12,10 @@ interface Props {
   rows: MonthView[];
   /** Recorded adjustments, to find the catch-up plan for a missed month. */
   adjustments: StateView['adjustments'];
+  /** Extra principal paid in transactions of their own. */
+  extraPayments: StateView['extraPayments'];
+  /** Daily-interest loan: an extra cuts interest from the day it was paid. */
+  daily: boolean;
   /** Escrow and PMI answers only make sense when the loan has them. */
   modules: LoanModules;
   payment: number;
@@ -64,7 +68,7 @@ function possible(answer: Resolution, diff: number, row: MonthView): boolean {
 }
 
 /** One month: pick the category, click the bank transaction, answer if flagged. */
-export function ReconcileView({ client, rows, adjustments, modules, payment, onPaymentChange, categoryId, onCategoryChange, onState, onRefresh }: Props) {
+export function ReconcileView({ client, rows, adjustments, extraPayments, daily, modules, payment, onPaymentChange, categoryId, onCategoryChange, onState, onRefresh }: Props) {
   const row = rows[payment - 1];
   const [groups, setGroups] = useState<CategoryGroup[] | null>(null);
   const [cands, setCands] = useState<Candidate[] | null>(null);
@@ -355,11 +359,231 @@ export function ReconcileView({ client, rows, adjustments, modules, payment, onP
           <dl className="mt-kv">
             <dt>Balance before</dt>
             <dd><Amt cents={row.beginningBalance} /></dd>
+            {row.extraPayments > 0 && (
+              <>
+                <dt>Extra payments</dt>
+                <dd><Amt cents={-row.extraPayments} /></dd>
+              </>
+            )}
             <dt>Balance after</dt>
             <dd><Amt cents={row.endingBalance} /></dd>
           </dl>
         </div>
       </div>
+
+      {row.status !== 'history' && (
+        <>
+          <div className="mt-gap" />
+          <ExtraPayments
+            key={row.payment}
+            client={client}
+            row={row}
+            extraPayments={extraPayments}
+            daily={daily}
+            categoryId={categoryId}
+            onState={onState}
+            onPaymentChange={onPaymentChange}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+interface ExtraProps {
+  client: LoanClient;
+  row: MonthView;
+  extraPayments: StateView['extraPayments'];
+  daily: boolean;
+  categoryId: string | null;
+  onState(state: StateView): void;
+  onPaymentChange(payment: number): void;
+}
+
+/**
+ * Extra principal paid on its own, apart from the regular payment: any
+ * number per month, each on its own date, each removable on its own.
+ */
+function ExtraPayments({ client, row, extraPayments, daily, categoryId, onState, onPaymentChange }: ExtraProps) {
+  const [mode, setMode] = useState<'closed' | 'actual' | 'manual'>('closed');
+  const [cands, setCands] = useState<Candidate[] | null>(null);
+  const [wide, setWide] = useState(false);
+  const [manual, setManual] = useState({ date: row.dueDate, amount: '', note: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [placed, setPlaced] = useState<number | null>(null);
+  const byId = new Map(extraPayments.map((e) => [e.id, e]));
+
+  useEffect(() => {
+    if (mode !== 'actual' || !categoryId) return;
+    setCands(null);
+    client.candidates(row.payment, categoryId, wide).then(
+      (list) => setCands(list.filter((t) => t.usedByPayment === null && t.usedByExtra === null && t.id !== row.match?.transactionId)),
+      (e: Error) => setError(e.message),
+    );
+  }, [client, row.payment, row.match?.transactionId, categoryId, wide, mode]);
+
+  const add = async (extra: Parameters<LoanClient['addExtraPayment']>[0]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const known = new Set(extraPayments.map((e) => e.id));
+      const next = await client.addExtraPayment(extra);
+      onState(next);
+      // Its date decides which month it applies with; say so when that isn't this one.
+      const added = next.extraPayments.find((e) => !known.has(e.id));
+      const home = next.schedule?.rows.find((r) => r.extraPaymentList.some((e) => e.id === added?.id));
+      setPlaced(home && home.payment !== row.payment ? home.payment : null);
+      setMode('closed');
+      setManual({ date: row.dueDate, amount: '', note: '' });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const addManual = () => {
+    const cents = parseDollars(manual.amount);
+    if (cents === null || cents <= 0) return setError('Enter the amount that went to principal, like 500');
+    void add({ date: manual.date, amount: cents, note: manual.note.trim() });
+  };
+  const remove = async (id: number) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onState(await client.deleteExtraPayment(id));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-card">
+      <h3>Extra principal paid on its own</h3>
+      <p className="mt-kpi-note" style={{ marginTop: 0 }}>
+        {daily
+          ? 'Paid apart from the regular payment. Interest stops on that amount from the day it was paid. Extras paid during this payment\'s interest period show here.'
+          : 'Paid apart from the regular payment. It comes off the balance right away and lowers the interest from the next payment on. Extras paid from this due date up to the next one show here.'}
+      </p>
+      {row.extraPaymentList.length > 0 ? (
+        <table className="mt-data" style={{ marginBottom: 10 }}>
+          <tbody>
+            {row.extraPaymentList.map((e) => {
+              const stored = e.id !== null ? byId.get(e.id) : undefined;
+              return (
+                <tr key={e.id ?? e.date}>
+                  <td className="l">{date(e.date)}</td>
+                  <td className="l muted">{stored?.transactionPayee ?? (stored?.note || 'Entered by hand')}</td>
+                  <td>
+                    <Amt cents={e.amount} />
+                    {stored && stored.amount !== e.amount && <span className="mt-kpi-note"> of <Amt cents={stored.amount} /></span>}
+                  </td>
+                  <td style={{ width: 1 }}>
+                    {e.id !== null && (
+                      <button type="button" className="mt-x" aria-label={`Remove the ${date(e.date)} extra payment`} disabled={busy} onClick={() => remove(e.id!)}>
+                        ✕
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <p style={{ marginTop: 0 }}>None with this payment.</p>
+      )}
+      {placed !== null && (
+        <div className="mt-note" style={{ marginBottom: 10 }}>
+          Added. Its date falls with payment #{placed}, so it applies there.{' '}
+          <button type="button" className="mt-btn link" onClick={() => onPaymentChange(placed)}>
+            Go to #{placed}
+          </button>
+        </div>
+      )}
+
+      {mode === 'closed' && (
+        <div className="mt-row">
+          <button type="button" className="mt-btn small" disabled={!categoryId} title={categoryId ? undefined : "Pick the loan's category first"} onClick={() => setMode('actual')}>
+            Add one from Actual
+          </button>
+          <button type="button" className="mt-btn small" onClick={() => setMode('manual')}>
+            Enter one by hand
+          </button>
+        </div>
+      )}
+
+      {mode === 'actual' && (
+        <>
+          <div className="mt-row" style={{ marginBottom: 8 }}>
+            <b>Payments in this loan's category near {date(row.dueDate)}</b>
+            <span className="mt-spacer" />
+            <button type="button" className="mt-btn link" onClick={() => setWide((w) => !w)}>
+              {wide ? 'Narrow search' : 'Search ±60 days'}
+            </button>
+            <button type="button" className="mt-btn link" onClick={() => setMode('closed')}>
+              Cancel
+            </button>
+          </div>
+          {cands === null && !error && <div className="mt-empty">Looking for transactions…</div>}
+          {cands?.length === 0 && <div className="mt-empty">No unused payments here. Widen the search, or enter it by hand.</div>}
+          {cands && cands.length > 0 && (
+            <div className="mt-cands">
+              {cands.map((t) => (
+                <button key={t.id} type="button" className="mt-cand" disabled={busy} onClick={() => add({ transactionId: t.id, payment: row.payment, categoryId })}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{t.payee ?? 'No payee'}</div>
+                    <div className="meta">
+                      {date(t.date)} · {t.account ?? ''}
+                    </div>
+                  </div>
+                  <div className="amt">
+                    <Amt cents={t.paid} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {mode === 'manual' && (
+        <div className="mt-inline-form">
+          <div className="mt-field">
+            <label htmlFor="mt-xp-date">Paid on</label>
+            <input id="mt-xp-date" type="date" className="mt-input" value={manual.date} onChange={(e) => setManual({ ...manual, date: e.target.value })} />
+          </div>
+          <div className="mt-field">
+            <label htmlFor="mt-xp-amount">To principal</label>
+            <div className="mt-prefix">
+              <span>$</span>
+              <input id="mt-xp-amount" className="mt-input" inputMode="decimal" placeholder="500.00" value={manual.amount} onChange={(e) => setManual({ ...manual, amount: e.target.value })} />
+            </div>
+          </div>
+          <div className="mt-field">
+            <label htmlFor="mt-xp-note">Note</label>
+            <input id="mt-xp-note" className="mt-input" maxLength={200} placeholder="Optional" value={manual.note} onChange={(e) => setManual({ ...manual, note: e.target.value })} />
+          </div>
+          <div className="mt-row">
+            <button type="button" className="mt-btn primary" disabled={busy} onClick={addManual}>
+              Add
+            </button>
+            <button type="button" className="mt-btn link" onClick={() => setMode('closed')}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error && (
+        <div className="mt-note bad" style={{ marginTop: 10 }} role="alert">
+          {error}
+        </div>
+      )}
+      {row.extraPaymentList.length === 0 && mode === 'closed' && (
+        <p className="mt-kpi-note">Only principal: leave out anything the lender put toward interest or fees.</p>
+      )}
     </div>
   );
 }

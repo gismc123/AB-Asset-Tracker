@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import type {
   Adjustment,
   AdjustmentKind,
+  BankRow,
   AssetKind,
   AssetValue,
   Cents,
@@ -26,8 +27,8 @@ import { migrate } from './migrations.js';
  * date, amount and payee, kept so the month can show what it was matched to.
  */
 
-export type LoanType = 'mortgage' | 'auto' | 'personal';
-export const LOAN_TYPES: LoanType[] = ['mortgage', 'auto', 'personal'];
+export type LoanType = 'mortgage' | 'auto' | 'personal' | 'student';
+export const LOAN_TYPES: LoanType[] = ['mortgage', 'auto', 'personal', 'student'];
 
 export interface LoanRecord {
   id: number;
@@ -62,9 +63,32 @@ export interface StoredAdjustment {
   createdAt: string;
 }
 
+/** One month of the lender's amortization table (see `BankRow`). */
+export interface StoredBankRow extends BankRow {
+  importedAt: string;
+}
+
+/** Extra principal paid in a transaction of its own (see `ExtraPayment`). */
+export interface StoredExtraPayment {
+  id: number;
+  date: ISODate;
+  /** Positive cents. */
+  amount: Cents;
+  /** The bank transaction in Actual, or null when entered by hand. */
+  transactionId: string | null;
+  transactionPayee: string | null;
+  note: string;
+  createdAt: string;
+}
+
 export interface Settings {
   /** The Actual category this loan's payments are booked to. */
   categoryId: string | null;
+  /**
+   * An Actual account that tracks this loan's balance (usually off budget),
+   * to compare with the tracker's. Read only; null = no cross-check.
+   */
+  balanceAccountId: string | null;
 }
 
 export interface StoredAssetValue extends AssetValue {
@@ -80,6 +104,12 @@ export interface AssetRecord {
   valueTrend: ValueTrend;
   trendRatePercent: number | null;
   acquiredDate: ISODate | null;
+  /**
+   * Use this Actual account's balance as the value, read live (an
+   * off-budget account kept up to date some other way). The values
+   * entered here are the fallback. Null = values entered here only.
+   */
+  actualAccountId: string | null;
   /** Oldest first. */
   values: StoredAssetValue[];
 }
@@ -212,6 +242,17 @@ export class Store {
     return row ? fromAssetRow(row, this.listAssetValues(row.id)) : null;
   }
 
+  /** Every Actual account linked to an asset or to a loan's balance cross-check. */
+  linkedAccountIds(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT actual_account_id AS id FROM assets WHERE actual_account_id IS NOT NULL
+         UNION SELECT balance_account_id FROM loan_settings WHERE balance_account_id IS NOT NULL`,
+      )
+      .all() as { id: string }[];
+    return rows.map((r) => r.id);
+  }
+
   assetForLoan(loanId: number): AssetRecord | null {
     const row = this.db.prepare(`SELECT * FROM assets WHERE loan_id = ?`).get(loanId) as AssetRow | undefined;
     return row ? fromAssetRow(row, this.listAssetValues(row.id)) : null;
@@ -220,10 +261,10 @@ export class Store {
   createAsset(a: AssetInput): AssetRecord {
     const result = this.db
       .prepare(
-        `INSERT INTO assets (loan_id, name, kind, original_value_cents, value_trend, trend_rate_percent, acquired_date, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO assets (loan_id, name, kind, original_value_cents, value_trend, trend_rate_percent, acquired_date, actual_account_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(a.loanId, a.name, a.kind, a.originalValue, a.valueTrend, a.trendRatePercent, a.acquiredDate, new Date().toISOString());
+      .run(a.loanId, a.name, a.kind, a.originalValue, a.valueTrend, a.trendRatePercent, a.acquiredDate, a.actualAccountId, new Date().toISOString());
     return this.getAsset(Number(result.lastInsertRowid))!;
   }
 
@@ -231,9 +272,9 @@ export class Store {
     const changes = this.db
       .prepare(
         `UPDATE assets SET loan_id = ?, name = ?, kind = ?, original_value_cents = ?, value_trend = ?,
-                trend_rate_percent = ?, acquired_date = ? WHERE id = ?`,
+                trend_rate_percent = ?, acquired_date = ?, actual_account_id = ? WHERE id = ?`,
       )
-      .run(a.loanId, a.name, a.kind, a.originalValue, a.valueTrend, a.trendRatePercent, a.acquiredDate, id).changes;
+      .run(a.loanId, a.name, a.kind, a.originalValue, a.valueTrend, a.trendRatePercent, a.acquiredDate, a.actualAccountId, id).changes;
     return changes ? this.getAsset(id) : null;
   }
 
@@ -285,19 +326,20 @@ export class LoanStore {
   // --- settings -------------------------------------------------------------
 
   getSettings(): Settings {
-    const row = this.db.prepare(`SELECT category_id FROM loan_settings WHERE loan_id = ?`).get(this.loanId) as
-      | { category_id: string | null }
+    const row = this.db.prepare(`SELECT category_id, balance_account_id FROM loan_settings WHERE loan_id = ?`).get(this.loanId) as
+      | { category_id: string | null; balance_account_id: string | null }
       | undefined;
-    return { categoryId: row?.category_id ?? null };
+    return { categoryId: row?.category_id ?? null, balanceAccountId: row?.balance_account_id ?? null };
   }
 
-  saveSettings(settings: Settings) {
+  saveSettings(settings: Pick<Settings, 'categoryId'> & Partial<Settings>) {
+    const balanceAccountId = settings.balanceAccountId === undefined ? this.getSettings().balanceAccountId : settings.balanceAccountId;
     this.db
       .prepare(
-        `INSERT INTO loan_settings (loan_id, category_id) VALUES (?, ?)
-         ON CONFLICT (loan_id) DO UPDATE SET category_id = excluded.category_id`,
+        `INSERT INTO loan_settings (loan_id, category_id, balance_account_id) VALUES (?, ?, ?)
+         ON CONFLICT (loan_id) DO UPDATE SET category_id = excluded.category_id, balance_account_id = excluded.balance_account_id`,
       )
-      .run(this.loanId, settings.categoryId);
+      .run(this.loanId, settings.categoryId, balanceAccountId);
   }
 
   // --- adjustments ------------------------------------------------------------
@@ -397,6 +439,66 @@ export class LoanStore {
     this.db.prepare(`DELETE FROM months WHERE loan_id = ? AND payment = ?`).run(this.loanId, payment);
   }
 
+  // --- extra payments of their own ------------------------------------------------
+
+  listExtraPayments(): StoredExtraPayment[] {
+    return this.db
+      .prepare(
+        `SELECT id, date, amount, transaction_id AS transactionId, transaction_payee AS transactionPayee, note, created_at AS createdAt
+         FROM extra_payments WHERE loan_id = ? ORDER BY date, id`,
+      )
+      .all(this.loanId) as StoredExtraPayment[];
+  }
+
+  addExtraPayment(e: Omit<StoredExtraPayment, 'id' | 'createdAt'>): number {
+    const result = this.db
+      .prepare(`INSERT INTO extra_payments (loan_id, date, amount, transaction_id, transaction_payee, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(this.loanId, e.date, e.amount, e.transactionId, e.transactionPayee, e.note, new Date().toISOString());
+    return Number(result.lastInsertRowid);
+  }
+
+  deleteExtraPayment(id: number): boolean {
+    return this.db.prepare(`DELETE FROM extra_payments WHERE id = ? AND loan_id = ?`).run(id, this.loanId).changes > 0;
+  }
+
+  /** The extra payment matched to this bank transaction, if any. */
+  extraForTransaction(transactionId: string): number | null {
+    const row = this.db.prepare(`SELECT id FROM extra_payments WHERE loan_id = ? AND transaction_id = ?`).get(this.loanId, transactionId) as
+      | { id: number }
+      | undefined;
+    return row?.id ?? null;
+  }
+
+  // --- the lender's amortization table ----------------------------------------------
+
+  listBankRows(): StoredBankRow[] {
+    return this.db
+      .prepare(
+        `SELECT payment, due_date AS dueDate, payment_amount AS paymentAmount, principal, interest, balance, imported_at AS importedAt
+         FROM bank_schedule WHERE loan_id = ? ORDER BY payment`,
+      )
+      .all(this.loanId) as StoredBankRow[];
+  }
+
+  /** Add months from the lender's table; a month already there is replaced. */
+  saveBankRows(rows: readonly BankRow[]) {
+    const now = new Date().toISOString();
+    const put = this.db.prepare(
+      `INSERT INTO bank_schedule (loan_id, payment, due_date, payment_amount, principal, interest, balance, imported_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (loan_id, payment) DO UPDATE SET due_date = excluded.due_date, payment_amount = excluded.payment_amount,
+         principal = excluded.principal, interest = excluded.interest, balance = excluded.balance, imported_at = excluded.imported_at`,
+    );
+    for (const r of rows) put.run(this.loanId, r.payment, r.dueDate, r.paymentAmount, r.principal, r.interest, r.balance, now);
+  }
+
+  /** Remove one month, or every month when `payment` is left out. Returns how many were removed. */
+  deleteBankRows(payment?: number): number {
+    return payment === undefined
+      ? this.db.prepare(`DELETE FROM bank_schedule WHERE loan_id = ?`).run(this.loanId).changes
+      : this.db.prepare(`DELETE FROM bank_schedule WHERE loan_id = ? AND payment = ?`).run(this.loanId, payment).changes;
+  }
+
   // --- escrow entries ---------------------------------------------------------------
 
   listEscrowEntries(): EscrowEntry[] {
@@ -481,6 +583,7 @@ interface AssetRow {
   value_trend: ValueTrend;
   trend_rate_percent: number | null;
   acquired_date: string | null;
+  actual_account_id: string | null;
 }
 
 const fromAssetRow = (r: AssetRow, values: StoredAssetValue[]): AssetRecord => ({
@@ -492,6 +595,7 @@ const fromAssetRow = (r: AssetRow, values: StoredAssetValue[]): AssetRecord => (
   valueTrend: r.value_trend,
   trendRatePercent: r.trend_rate_percent,
   acquiredDate: r.acquired_date,
+  actualAccountId: r.actual_account_id,
   values,
 });
 

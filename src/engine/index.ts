@@ -8,3 +8,6 @@ export * from './periods.js';
 export * from './equity.js';
 export * from './escrow.js';
 export * from './assets.js';
+export * from './whatif.js';
+export * from './effective-rate.js';
+export * from './bank-table.js';

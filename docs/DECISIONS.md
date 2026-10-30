@@ -95,3 +95,92 @@ decided by the maintainer; the rest are defaults that can be revisited.
 
 - **Migration golden files come from the last single-loan release, stored gzipped under `test/fixtures`.** They prove behavior to the cent and stay out of the Docker image.
 - **Screenshots are generated from `dist/ui/preview.html` with Playwright at 1360 px wide.** Reproducible and always made-up data.
+
+## v0.2.0
+
+Defaults chosen while adding the v0.2.0 features. None of them changes the
+numbers of a loan saved by v0.1.0; each new option is off until chosen.
+
+### Loan types
+
+- **Student loans are their own type, `student`, with no asset, PMI or escrow, like a personal loan.** A type of its own lets the picker, the sidebar icon and the summary endpoint say what the loan is. Dashboards may now see `type: "student"`; no existing value changed.
+- **Migration 3 rebuilds the `loans` table to widen its type check, keeping every id and the AUTOINCREMENT counter.** SQLite can't change a CHECK in place; keeping the counter means a deleted loan's id is never handed to a new loan, so a dashboard's `?loan=<id>` can't silently point somewhere else.
+- **A new student loan defaults to 120 monthly payments and monthly interest.** Ten years is the common standard plan; monthly interest stays the default for every type (the field's hint says many student loans use daily interest).
+
+### Asset value from an Actual account
+
+- **The link is per asset (`assets.actual_account_id`, migration 4) and empty for every existing asset.** Nothing changes until someone picks an account.
+- **The balance is summed from the account's transactions up to today, with the same `getTransactions` read the reconcile screen uses.** Actual's own `getAccountBalance` runs inside its change-tracking wrapper; summing plain reads keeps every call to Actual a read. Future-dated transactions are left out, as Actual's own balance does.
+- **The account's balance becomes the newest value, dated the day it was read; the values entered in the tracker stay as the fallback.** Equity, the chart, the projection and the summary endpoint all work from "the newest value" already, so nothing else had to learn about accounts, and unlinking loses nothing.
+- **A negative balance is never used as a value; the entered values are used, with a note.** An asset account in Actual has a positive balance; a negative one means a debt account was picked by mistake.
+- **When Actual can't be read, a balance read earlier is kept and flagged; with none, the entered values are used.** A dashboard or the Loans screen keeps working while Actual restarts, and says why the number may be old.
+- **Balances are read only for linked accounts, at most every 30 seconds, and only on the loan list, loan state and summary requests.** A tracker with no links never asks Actual for a balance, so existing installs see no new traffic.
+- **The summary endpoint's `valueSource` says `Actual account`, without the account's name.** The name is the user's own label and the endpoint never carried account details.
+
+### Extra payments of their own
+
+- **Extra payments live in their own table (`extra_payments`, migration 5), not in `months`.** A month keeps exactly one regular match, as before, and any number of extras sit beside it. Nothing about how v0.1.0 data is stored changes.
+- **An extra is placed by its own date, not by the month it was added from.** On a monthly-interest loan it comes off after the last payment due on or before its date, so the next payment's interest is lower (how monthly-accrual servicers apply a curtailment). On a daily-interest loan it lands inside the interest period that contains its date, and interest is split at that day. The Reconcile screen says when an extra lands with another month.
+- **Extras are part of `principal` but not of `total`.** `total` is what the regular transaction should be, so matching it is unchanged; principal, the balance, totals and every date after it include the extra.
+- **A reconciled month's lock holds the regular payment only, and extras are applied on top.** Adding or removing an extra never changes a reconciled month, and undo removes exactly one extra.
+- **An extra dated in a month that isn't reconciled yet still lowers today's balance, equity and payoff.** The money has left; waiting for the next reconciliation would understate equity.
+- **A skipped month takes no extras; they carry to the next payment made.** Keeps the skip rules simple. On a daily loan the carried extra counts from the start of that next period (see KNOWN_LIMITATIONS).
+- **Extras dated on or before the last payment made before tracking are ignored, and the service refuses them.** The statement balance used as the starting point already includes them.
+- **An extra that would overpay the loan is refused.** The schedule caps extras at the balance; refusing at entry keeps the stored amount equal to what was applied.
+- **Extras can come from Actual (any unused payment in the loan's category near the month) or be entered by hand.** An extra paid from another account or category still counts. A bank transaction can be used once, as a regular match or as one extra.
+
+### Payoff date and what-if
+
+- **Real extra principal already moved the payoff date in v0.1.0; v0.2.0 adds tests that pin it, for extras inside the regular payment and for extras of their own, along with the PMI request date.** Nothing to fix.
+- **What-if runs on the server against the saved schedule, with every recorded payment, extra, skip and lock, and writes nothing.** The answer starts from where the loan really is, and a test checks the database is unchanged after it.
+- **The monthly extra applies from the next payment not yet matched or skipped; the lump sum is a hypothetical extra payment on its own date.** It uses the same engine code as a real standing extra and a real extra payment, so tests prove "try it" and "make it real" give the same payoff to the cent.
+- **The headline is the payoff date and how much sooner, then what's owed and equity on chosen dates; interest is shown smaller.** As asked: interest stays available but isn't the headline.
+- **Comparison dates default to 1, 5 and 10 years from today, and can be changed.** Short, medium and long horizons without typing.
+- **"Make this my standing extra" records a standing-extra change from the next unpaid payment, on top of any standing extra already in place, and can be removed from the same screen.** It uses the adjustment the reconcile flow already writes, so nothing new is stored; reconciled months keep what they paid. The lump sum is never saved: when it's really paid, it's recorded as an extra payment.
+- **Equity on a future date uses the asset's projected curve when it has one, otherwise its value today.** The same value on both plans, so the difference is only what's owed.
+
+### Daily interest
+
+- **Shipped: daily accrual per loan, off by default (monthly).** It existed in v0.1.0; v0.2.0 adds dated extra payments, so a mid-month extra cuts interest only for the days after it. A three-period example worked by hand (with an extra and an early payment) is a test, to the cent.
+- **Within a period with extras, balance-days are summed and rounded once.** With no extra this is exactly v0.1.0's single rounding, so existing daily loans keep every cent.
+
+### Fees
+
+- **One-off fees gain an optional date and "added to the balance"; existing fees keep their shape and meaning.** An undated fee is still paid at opening, `financed` still means it's in the amount borrowed. The new keys are only written when used, so a v0.1.0 setup saves byte for byte the same.
+- **A dated fee paid separately is shown on the month its date falls in and counted in the totals, but is never part of the payment or the balance.** The regular payment still matches the bank; the fee is visible.
+- **A fee added to the balance needs a date after the loan was opened.** One added at opening is part of the amount borrowed, which `financed` already covers; refusing the overlap keeps the two from being counted twice.
+- **A fee added to the balance keeps the payment the same, so the loan runs longer; interest accrues on it from its date.** Like interest added by a skipped month. Lenders that re-amortize instead can be matched with a P&I override.
+- **Fees use the same dated-event placement as extra payments.** Monthly loans apply them after the payment due on or before their date; daily loans split the interest period at the date. One rule to learn and test.
+- **A yearly fee can be charged with the payment (default, v0.1.0 behavior) or separately.** Charged separately, it stays on payments 1, 13, 25 even when that month is skipped or reconciled, since it isn't part of the payment.
+- **Schedule totals keep `fees` as yearly fees and add `oneOffFees` and `feesAdded`.** Existing readers of `fees` see the same number; the new totals are additions.
+
+### Effective rate
+
+- **The effective rate is the yearly rate, compounded monthly, that makes what was received equal what is paid back on the original schedule, and it's always labeled an estimate.** It is the effective annual rate (EAR), not a regulatory APR; it says one plain thing and a short explanation sits under it.
+- **Received is the amount borrowed less fees paid at opening and fees financed into it; paid back is principal and interest, yearly fees and later one-off fees.** That's the standard way fees raise a loan's real rate. A fee added to the balance counts through the extra payments it causes.
+- **PMI, escrow and extra principal are left out, and it follows the original schedule.** PMI and escrow are insurance and taxes, extra principal is a choice, and skips are events; the rate describes the loan's terms.
+- **Shown on the Overview under the totals, not in the headline cards.** It's context for the cost of the loan, not something tracked month to month.
+
+### Importing the lender's amortization table
+
+- **CSV only; no PDF.** Lenders' PDFs differ in layout, many are scans, and pulling a table out of one reliably needs either a heavy dependency or guesswork per lender. Every spreadsheet and most lender portals can save CSV. Recorded in KNOWN_LIMITATIONS.
+- **The file is read in the browser (delimiter, quotes, number and date formats guessed, every column mappable) and only the parsed months are sent.** The file never reaches the server, and the server checks every number it's sent.
+- **Months are matched by payment number when the file has one, otherwise by the month of the date.** Lenders' dates can be a day or two off the due date; the month is what matters.
+- **Imported months are stored per loan and payment (`bank_schedule`, migration 6); importing a month again replaces it.** Re-importing a corrected table needs no clean-up first, and removing one month or all is one click.
+- **An imported month uses the lender's interest and principal exactly; penny offsets, extras and fees still apply on top, and the P&I override still sets every other month.** The table replaces only what it says.
+- **Reconciled, skipped and pre-tracking months keep what they have, and the preview says so.** A reconciled month is a fact; undoing it lets the imported numbers apply.
+- **The lender's balance column is a check, not a value: the tracker's balance carries on from the imported principal, and later months recalculate from the balance the table leaves.** With no extras and a table that starts where the loan did, the two agree to the cent and the preview says so; when they don't (extras recorded here, a table that starts elsewhere) the preview shows the difference instead of silently overwriting the real balance.
+- **The preview runs on the server against the real schedule and saves nothing; "Use these months" saves.** Same pattern as what-if.
+
+### README and the desktop app
+
+- **The README now opens with what the add-on is, its requirements and its main limits, before installing.** People were installing it for setups it can't serve (a hosted Actual, the desktop app).
+- **The desktop app is called "not supported (untested)", never "works".** It renders its own bundled pages, so the proxy's script tag never reaches it; supporting it would mean changing the desktop app itself, which this add-on doesn't do.
+
+### Balance cross-check
+
+- **One optional Actual account per loan (`loan_settings.balance_account_id`, migration 7), empty for every existing loan.** Off until someone picks one; nothing else reads it.
+- **The amounts are compared without their sign.** Actual shows a loan account's balance as a negative number (what's owed); the tracker shows what's owed as a positive one.
+- **The tracker's principal balance today is compared, not what's owed with deferred or past-due amounts.** A loan account in Actual normally follows principal, split out of each payment.
+- **A difference is shown with the likeliest reason, never "fixed".** Read-only: the tracker can't and won't change the account.
+- **`PUT /settings` still clears the category when `categoryId` is missing, as in v0.1.0; `balanceAccountId` changes only when it's sent.** The existing route and the existing UI call keep their behavior.

@@ -22,13 +22,14 @@ wrapper, which runs the same commands in the official Node image:
 
 **Preview the screens without Actual.** After a build, open
 `dist/ui/preview.html` in a browser. It runs the real components against an
-in-memory mock with three made-up loans and a mock sidebar. Add
+in-memory mock with four made-up loans and a mock sidebar. Add
 `?theme=dark`, `?empty` (first-run screen), `?privacy`, or `?loan=2`.
 
 **Tests use no real Actual server or data.** Backend tests run against an
 in-memory database and a fake Actual source (`src/server/testing.ts`). The
-migration tests load databases in the tracker's first schema
-(`test/fixtures`) and check the migrated loan matches its numbers exactly.
+migration tests load databases in the tracker's first schema and a v0.1.0
+database (`test/fixtures`) and check every loan still matches its numbers
+exactly.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for how to propose changes, and
 [docs/DECISIONS.md](DECISIONS.md),
@@ -39,7 +40,7 @@ planned.
 ## Project layout
 
 ```
-src/engine/      Amortization, interest, fees, skips, PMI, reconciliation, equity, assets, escrow, period totals (pure, tested)
+src/engine/      Amortization, interest, fees, extra payments, skips, PMI, reconciliation, equity, assets, escrow, period totals, what-if, effective rate, lender's table (pure, tested)
 src/server/      Backend: config, read-only Actual adapter, SQLite store and migrations, services, HTTP API
 src/ui/          Loan screens (React), sidebar list, API client, styles, preview
 src/inject/      The one script the proxy injects into Actual's page
@@ -64,14 +65,15 @@ cents.
 | `GET /health` | Liveness, and whether Actual is connected (no error text; that's in the loan state) |
 | `GET /v1/summary[?loan=<id>]` | Read-only dashboard summary (own token, see above) |
 | `GET /categories` | Actual's category groups |
+| `GET /accounts` | Actual's accounts (id, name, off budget, closed), to link one |
 | `GET /loans` | Every loan with what it owes, its equity and next payment |
-| `POST /loans` | `{ nickname, type, setup?, asset?, categoryId? }`: add a loan |
+| `POST /loans` | `{ nickname, type, setup?, asset?, categoryId? }`: add a loan (`type`: mortgage, auto, personal or student) |
 | `PATCH /loans/:loanId` | `{ nickname?, type?, archived? }` |
 | `POST /loans/:loanId/archive`, `/unarchive` | Hide or show a loan |
 | `DELETE /loans/:loanId?confirm=<nickname>[&keepAsset=1]` | Delete a loan and its records (its asset too, unless `keepAsset`) |
 | `GET /loans/:loanId/state` | Setup, schedule with statuses, summary, equity, periods, escrow, asset, details |
 | `PUT /loans/:loanId/setup` | Save the loan setup |
-| `PUT /loans/:loanId/settings` | `{ categoryId }`: the loan's Actual category |
+| `PUT /loans/:loanId/settings` | `{ categoryId, balanceAccountId? }`: the loan's Actual category, and an Actual account to cross-check the balance with (only changed when sent) |
 | `GET /loans/:loanId/months/:n/candidates?categoryId=&wide=1` | Transactions near payment *n*'s due date |
 | `POST /loans/:loanId/months/:n/match` | `{ transactionId }` → paid, or flagged with suggestions |
 | `POST /loans/:loanId/months/:n/resolve` | `{ resolution: rounding\|escrow\|pmi\|extraPrincipal, standing? }` |
@@ -81,13 +83,21 @@ cents.
 | `POST /loans/:loanId/months/:n/unskip` | Undo a skip |
 | `PUT /loans/:loanId/months/:n/catch-up` | `{ fromPayment, months }`: plan to pay back missed payment *n* |
 | `DELETE /loans/:loanId/months/:n/catch-up` | Remove that plan |
+| `POST /loans/:loanId/extra-payments` | `{ transactionId, payment, categoryId? }` or `{ date, amount, note? }`: extra principal paid on its own |
+| `DELETE /loans/:loanId/extra-payments/:id` | Remove one extra payment |
+| `POST /loans/:loanId/what-if` | `{ monthlyExtra?, lumpSum?: { date, amount }, dates? }`: compare with the real schedule. Saves nothing |
+| `POST /loans/:loanId/standing-extra` | `{ amount }`: pay this much more from the next unpaid payment on |
+| `DELETE /loans/:loanId/standing-extra/:id` | Remove a standing extra set that way |
+| `POST /loans/:loanId/bank-schedule/preview` | `{ rows }`: what importing the lender's table would do. Saves nothing |
+| `PUT /loans/:loanId/bank-schedule` | `{ rows }`: save months from the lender's table (replaces the same months) |
+| `DELETE /loans/:loanId/bank-schedule[/:n]` | Remove one imported month, or all |
 | `PUT /loans/:loanId/pmi/removal` | `{ fromPayment }`: PMI stopped from this payment on (replaces an earlier record) |
 | `DELETE /loans/:loanId/pmi/removal` | Remove that record |
 | `POST /loans/:loanId/escrow/entries` | `{ date, kind, amount, note }`: an escrow bill or deposit |
 | `DELETE /loans/:loanId/escrow/entries/:id` | Remove an escrow entry |
 | `PUT /loans/:loanId/details` | `{ fields, custom }`: save loan details |
 | `GET /assets` | Every asset with its values |
-| `POST /assets` | `{ name, kind, originalValue, valueTrend?, trendRatePercent?, acquiredDate?, loanId? }` |
+| `POST /assets` | `{ name, kind, originalValue, valueTrend?, trendRatePercent?, acquiredDate?, actualAccountId?, loanId? }` (`actualAccountId`: use that Actual account's balance as the value) |
 | `PATCH /assets/:assetId` | Change any of those fields |
 | `DELETE /assets/:assetId` | Remove an asset and its values |
 | `POST /assets/:assetId/values` | `{ date, value, source }`: add a value |

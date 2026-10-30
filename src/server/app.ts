@@ -74,7 +74,7 @@ export function createApp(deps: AppDeps) {
   // Opt-in with its own token, because a dashboard can't log in to Actual.
   // Send it as "Authorization: Bearer <token>". The ?token= query form still
   // works but is deprecated: query strings end up in logs and browser history.
-  api.get('/v1/summary', (req, res) => {
+  api.get('/v1/summary', async (req, res) => {
     if (!deps.summaryToken) {
       throw new HttpError(404, 'The summary endpoint is disabled. Set SUMMARY_TOKEN in .env to enable it.');
     }
@@ -90,6 +90,7 @@ export function createApp(deps: AppDeps) {
       }
     }
     res.set('Cache-Control', 'no-store');
+    await service.refreshLinked();
     if (req.query.loan !== undefined) {
       const id = Number(req.query.loan);
       if (!Number.isInteger(id) || id < 1) throw new HttpError(400, 'loan must be a loan id');
@@ -114,9 +115,13 @@ export function createApp(deps: AppDeps) {
   api.get('/categories', async (_req, res) => {
     res.json(await service.categories());
   });
+  api.get('/accounts', async (_req, res) => {
+    res.json(await service.accounts());
+  });
 
   // --- loans ------------------------------------------------------------------
-  api.get('/loans', (_req, res) => {
+  api.get('/loans', async (_req, res) => {
+    await service.refreshLinked();
     res.json(service.loans());
   });
   api.post('/loans', (req, res) => {
@@ -139,8 +144,10 @@ export function createApp(deps: AppDeps) {
   const loan = express.Router({ mergeParams: true });
   const one = (req: Request) => service.loan(intParam(req, 'loanId'));
 
-  loan.get('/state', (req, res) => {
-    res.json(one(req).state());
+  loan.get('/state', async (req, res) => {
+    const svc = one(req);
+    await service.refreshLinked();
+    res.json(svc.state());
   });
   loan.put('/setup', (req, res) => {
     res.json(one(req).saveSetup(req.body));
@@ -174,6 +181,35 @@ export function createApp(deps: AppDeps) {
   });
   loan.delete('/months/:payment/catch-up', (req, res) => {
     res.json(one(req).clearCatchUpPlan(paymentParam(req)));
+  });
+  loan.post('/extra-payments', async (req, res) => {
+    res.status(201).json(await one(req).addExtraPayment(req.body));
+  });
+  loan.delete('/extra-payments/:id', (req, res) => {
+    res.json(one(req).deleteExtraPayment(idParam(req)));
+  });
+  loan.post('/bank-schedule/preview', (req, res) => {
+    res.json(one(req).previewBankSchedule(req.body));
+  });
+  loan.put('/bank-schedule', (req, res) => {
+    res.json(one(req).saveBankSchedule(req.body));
+  });
+  loan.delete('/bank-schedule', (req, res) => {
+    res.json(one(req).deleteBankSchedule());
+  });
+  loan.delete('/bank-schedule/:payment', (req, res) => {
+    res.json(one(req).deleteBankSchedule(paymentParam(req)));
+  });
+  loan.post('/what-if', async (req, res) => {
+    const svc = one(req);
+    await service.refreshLinked();
+    res.json(svc.whatIf(req.body));
+  });
+  loan.post('/standing-extra', (req, res) => {
+    res.status(201).json(one(req).setStandingExtra(req.body));
+  });
+  loan.delete('/standing-extra/:id', (req, res) => {
+    res.json(one(req).deleteStandingExtra(idParam(req)));
   });
   loan.put('/pmi/removal', (req, res) => {
     res.json(one(req).setPmiRemoval(req.body));

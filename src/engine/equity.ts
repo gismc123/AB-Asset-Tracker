@@ -1,5 +1,5 @@
 import { currentValue, hasProjection, homeAssetFor, projectedValue, type Asset } from './assets.js';
-import { settledRows } from './summary.js';
+import { notYetSettled, settledRows } from './summary.js';
 import type { Cents, ISODate, LoanSetup, Schedule } from './types.js';
 
 export interface EquityMilestone {
@@ -53,6 +53,8 @@ export interface EquityAnalysis {
     extraBeforeTracking: Cents;
     /** Skipped payments: interest added, or payments deferred or past due (zero or negative). */
     skipped: Cents;
+    /** One-off fees added to the balance (zero or negative). */
+    feesAdded: Cents;
     /** Value change since purchase (zero without an estimate). */
     marketChange: Cents;
   };
@@ -107,14 +109,20 @@ export function analyzeEquity(
   });
 
   const last = settledIndex >= 0 ? projection[settledIndex]! : null;
-  const balance = settledIndex >= 0 ? schedule.rows[settledIndex]!.endingBalance : setup.originalAmount;
-  const owed = last ? last.owed : setup.originalAmount;
+  // Extra payments made and fees added in a month not settled yet are already in the balance.
+  const pending = notYetSettled(schedule.rows, settledIndex >= 0 ? schedule.rows[settledIndex]! : null, today);
+  const change = pending.feesAdded - pending.extras;
+  const balance = (settledIndex >= 0 ? schedule.rows[settledIndex]!.endingBalance : setup.originalAmount) + change;
+  const owed = (last ? last.owed : setup.originalAmount) + change;
   const equity = homeValue - owed;
 
   let principalPaid = 0;
-  let extraPrincipal = 0;
+  let extraPrincipal = pending.extras;
+  let feesAdded = -pending.feesAdded;
   let extraBeforeTracking = 0;
   for (const r of settled) {
+    extraPrincipal += r.extraPayments;
+    feesAdded -= r.feesAdded;
     principalPaid += r.catchUp?.principal ?? 0;
     if (r.skipped) continue;
     principalPaid += r.scheduledPrincipal + r.pennyOffset;
@@ -124,7 +132,7 @@ export function analyzeEquity(
   const startingEquity = asset.originalValue - setup.originalAmount;
   const marketChange = homeValue - asset.originalValue;
   // Whatever the paid principal doesn't explain comes from skipped months.
-  const skipped = equity - (startingEquity + principalPaid + extraPrincipal + extraBeforeTracking + marketChange);
+  const skipped = equity - (startingEquity + principalPaid + extraPrincipal + extraBeforeTracking + feesAdded + marketChange);
 
   const equityPercent = pct(equity, homeValue);
   const milestones = (asset.kind === 'home' ? HOME_MILESTONES : OTHER_MILESTONES).map((percent): EquityMilestone => {
@@ -145,7 +153,7 @@ export function analyzeEquity(
     equity,
     equityPercent,
     ltv: pct(owed, homeValue),
-    parts: { startingEquity, downPayment: setup.downPayment ?? null, principalPaid, extraPrincipal, extraBeforeTracking, skipped, marketChange },
+    parts: { startingEquity, downPayment: setup.downPayment ?? null, principalPaid, extraPrincipal, extraBeforeTracking, skipped, feesAdded, marketChange },
     projected,
     milestones,
     projection,

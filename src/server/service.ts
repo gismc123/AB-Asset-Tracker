@@ -1,6 +1,10 @@
 import {
   addDays,
+  addYears,
   analyzeEquity,
+  checkBalance,
+  dueDateFor,
+  effectiveRate,
   compareToSchedule,
   escrowReport,
   isEscrowKind,
@@ -18,10 +22,13 @@ import {
   resolutionToAdjustment,
   ResolutionError,
   SetupError,
+  standingExtraAt,
   summarize,
+  whatIf,
   validateSetup,
   type Asset,
   type AssetKind,
+  type AssetValueSource,
   type InterestMethod,
   type LoanModules,
   type OneOffFee,
@@ -30,7 +37,14 @@ import {
   type YearlyFee,
   type Cents,
   type EquityAnalysis,
+  type BalanceCheck,
+  type BankRow,
+  type EffectiveRate,
   type EscrowReport,
+  type ExtraPayment,
+  type GenerateOptions,
+  type WhatIfInput,
+  type WhatIfResult,
   type ISODate,
   type LoanSetup,
   type LockedPayment,
@@ -44,7 +58,7 @@ import {
   type SkipMode,
   type StartingPoint,
 } from '../engine/index.js';
-import type { BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
+import type { BudgetAccount, BudgetSource, BudgetTransaction, CategoryGroup, SourceStatus } from './actual.js';
 import { BackupError, exportBackup, restoreBackup, type Backup, type RestoreResult } from './backup.js';
 import {
   LOAN_DETAIL_FIELDS,
@@ -59,7 +73,10 @@ import {
   type Settings,
   type Store,
   type StoredAdjustment,
+  type StoredBankRow,
+  type StoredExtraPayment,
 } from './db.js';
+import { assetWithLinkedValue, LinkedAccounts } from './linked.js';
 
 export class HttpError extends Error {
   constructor(
@@ -83,6 +100,10 @@ export interface StateView {
   loan: LoanRecord;
   /** What the loan paid for, if recorded. Equity is measured against it. */
   asset: AssetRecord | null;
+  /** Where the asset's value comes from: values entered here, or a linked Actual account. Null without an asset. */
+  assetValue: AssetValueSource | null;
+  /** The tracker's balance next to a linked Actual loan account's. Null when no account is linked or the loan isn't set up. */
+  balanceCheck: BalanceCheck | null;
   setup: LoanSetup | null;
   settings: Settings;
   source: SourceStatus;
@@ -98,12 +119,18 @@ export interface StateView {
   } | null;
   summary: LoanSummary | null;
   adjustments: StoredAdjustment[];
+  /** Extra principal paid in transactions of their own. Each row says which it applied. */
+  extraPayments: StoredExtraPayment[];
+  /** Months imported from the lender's amortization table. Rows using them say `fromBank`. */
+  bankSchedule: StoredBankRow[];
   details: LoanDetails;
   analysis: {
     /** Null when the loan has no asset. */
     equity: EquityAnalysis | null;
     periods: Record<'paid' | 'scheduled', PeriodBreakouts>;
     escrow: EscrowReport;
+    /** Note rate and fees as one yearly rate. An estimate; null when it can't be worked out. */
+    effectiveRate: EffectiveRate | null;
   } | null;
 }
 
@@ -114,6 +141,8 @@ export interface Candidate extends BudgetTransaction {
   difference: Cents;
   /** Another month already matched to this transaction. */
   usedByPayment: number | null;
+  /** The extra payment this transaction is already recorded as, if any. */
+  usedByExtra: number | null;
 }
 
 export interface MatchResult {
@@ -241,18 +270,24 @@ function parseFees(v: unknown): OneOffFee[] {
   if (!Array.isArray(v)) throw new HttpError(400, 'fees must be a list');
   return v.map((f) => {
     const o = f && typeof f === 'object' ? (f as Record<string, unknown>) : {};
-    return {
+    const fee: OneOffFee = {
       label: typeof o.label === 'string' ? o.label.trim() : '',
       amount: typeof o.amount === 'number' ? Math.round(o.amount) : Number.NaN,
       financed: o.financed === true,
     };
+    // Only written when given, so a fee saved before these existed keeps its shape.
+    if (o.date !== undefined && o.date !== null && o.date !== '') fee.date = typeof o.date === 'string' ? o.date : '';
+    if (o.addedToBalance === true) fee.addedToBalance = true;
+    return fee;
   });
 }
 
 function parseYearlyFee(v: unknown): YearlyFee | null {
   if (v === null || v === '') return null;
   const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
-  return { basis: o.basis as YearlyFee['basis'], percent: typeof o.percent === 'number' ? o.percent : Number.NaN };
+  const fee: YearlyFee = { basis: o.basis as YearlyFee['basis'], percent: typeof o.percent === 'number' ? o.percent : Number.NaN };
+  if (o.collect !== undefined && o.collect !== 'payment') fee.collect = o.collect as YearlyFee['collect'];
+  return fee;
 }
 
 function parsePayoffQuote(v: unknown): PayoffQuote | null {
@@ -262,6 +297,56 @@ function parsePayoffQuote(v: unknown): PayoffQuote | null {
     amount: typeof o.amount === 'number' ? Math.round(o.amount) : Number.NaN,
     goodThrough: typeof o.goodThrough === 'string' ? o.goodThrough : '',
   };
+}
+
+/** What importing a lender's table would do (see `LoanService.previewBankSchedule`). */
+export interface BankPreview {
+  rows: {
+    payment: number;
+    dueDate: ISODate | null;
+    bank: BankRow;
+    now: { interest: Cents; principal: Cents; endingBalance: Cents } | null;
+    then: { interest: Cents; principal: Cents; endingBalance: Cents } | null;
+    /** False for a month that keeps what it has: reconciled, skipped, before tracking, or past the schedule. */
+    applies: boolean;
+    note: string | null;
+  }[];
+  applies: number;
+  /** The tracker's balance after the last imported month that applies, next to the lender's. */
+  balanceCheck: { payment: number; bank: Cents; tracker: Cents } | null;
+  payoffDate: { now: ISODate | null; then: ISODate | null };
+}
+
+/** Coerce `{ rows: BankRow[] }` from untrusted JSON. The browser reads the file; this checks what it sent. */
+export function parseBankRows(body: unknown): BankRow[] {
+  const b = bodyOf(body);
+  if (!Array.isArray(b.rows) || b.rows.length === 0) throw new HttpError(400, 'rows must be a list of months from the table');
+  if (b.rows.length > 1200) throw new HttpError(400, 'That table has more than 1,200 months');
+  const seen = new Set<number>();
+  return b.rows.map((v, i) => {
+    const o = bodyOf(v);
+    const where = `Row ${i + 1}`;
+    const cents = (k: string, nullable: boolean) => {
+      const x = o[k];
+      if (nullable && (x === null || x === undefined)) return null;
+      if (!Number.isInteger(x) || (x as number) < 0 || (x as number) > MAX_AMOUNT) throw new HttpError(400, `${where}: ${k} must be zero or more, in cents`);
+      return x as Cents;
+    };
+    const payment = o.payment;
+    if (!Number.isInteger(payment) || (payment as number) < 1 || (payment as number) > 1200) throw new HttpError(400, `${where}: payment must be a payment number`);
+    if (seen.has(payment as number)) throw new HttpError(400, `${where}: payment ${payment as number} appears twice`);
+    seen.add(payment as number);
+    const dueDate = o.dueDate === null || o.dueDate === undefined ? null : o.dueDate;
+    if (dueDate !== null && !isValidISODate(dueDate)) throw new HttpError(400, `${where}: dueDate must be a date like 2026-03-01, or null`);
+    return {
+      payment: payment as number,
+      dueDate: dueDate as ISODate | null,
+      paymentAmount: cents('paymentAmount', true),
+      principal: cents('principal', false)!,
+      interest: cents('interest', false)!,
+      balance: cents('balance', true),
+    };
+  });
 }
 
 function suggestionsFor(difference: Cents, modules: LoanModules): Resolution[] {
@@ -285,16 +370,20 @@ export class LoanService {
     private readonly source: BudgetSource,
     private readonly today: () => ISODate,
     readonly loan: LoanRecord,
+    private readonly linked: LinkedAccounts = new LinkedAccounts(source),
   ) {
     this.store = root.loan(loan.id);
   }
 
   /**
-   * The asset equity is measured against. A mortgage always has a home, so
-   * one without a recorded asset uses the home described by its setup.
+   * The asset equity is measured against, with a linked account's balance
+   * as its newest value. A mortgage always has a home, so one without a
+   * recorded asset uses the home described by its setup.
    */
   private asset(setup: LoanSetup): Asset | null {
-    return this.root.assetForLoan(this.loan.id) ?? (this.loan.type === 'mortgage' ? homeAssetFor(setup) : null);
+    const record = this.root.assetForLoan(this.loan.id);
+    if (record) return assetWithLinkedValue(record, this.linked).asset;
+    return this.loan.type === 'mortgage' ? homeAssetFor(setup) : null;
   }
 
   /** When each matched payment really left the bank, for daily-interest loans. */
@@ -310,16 +399,26 @@ export class LoanService {
     return setup;
   }
 
-  private build(setup: LoanSetup, paidOn?: [number, ISODate]): Schedule {
+  /** Everything recorded against the loan, as the schedule takes it. */
+  private options(paidOn?: [number, ISODate]): GenerateOptions {
     const adjustments = this.store.listAdjustments().map((a) => a.adjustment);
     const locked = new Map<number, LockedPayment>();
     for (const m of this.store.listMonths()) if (m.status === 'paid' && m.locked) locked.set(m.payment, m.locked);
+    const bankRows = new Map(this.store.listBankRows().map((r) => [r.payment, { principal: r.principal, interest: r.interest }]));
+    return { adjustments, locked, paidDates: this.paidDates(paidOn), extraPayments: this.extraPayments(), bankRows };
+  }
+
+  private build(setup: LoanSetup, paidOn?: [number, ISODate]): Schedule {
     try {
-      return generateSchedule(setup, { adjustments, locked, paidDates: this.paidDates(paidOn) });
+      return generateSchedule(setup, this.options(paidOn));
     } catch (e) {
       if (e instanceof SetupError) throw new HttpError(400, e.message, { problems: e.problems });
       throw e;
     }
+  }
+
+  private extraPayments(): ExtraPayment[] {
+    return this.store.listExtraPayments().map((e) => ({ id: e.id, date: e.date, amount: e.amount }));
   }
 
   private row(schedule: Schedule, payment: number): ScheduleRow {
@@ -342,17 +441,21 @@ export class LoanService {
 
   state(): StateView {
     const setup = this.store.getSetup();
+    const assetRecord = this.root.assetForLoan(this.loan.id);
     const base = {
       loan: this.root.getLoan(this.loan.id) ?? this.loan,
-      asset: this.root.assetForLoan(this.loan.id),
+      asset: assetRecord,
+      assetValue: assetRecord ? assetWithLinkedValue(assetRecord, this.linked).source : null,
       setup,
       settings: this.store.getSettings(),
       source: this.source.status(),
       today: this.today(),
       adjustments: this.store.listAdjustments(),
+      extraPayments: this.store.listExtraPayments(),
+      bankSchedule: this.store.listBankRows(),
       details: this.store.getDetails(),
     };
-    if (!setup) return { ...base, schedule: null, summary: null, analysis: null };
+    if (!setup) return { ...base, balanceCheck: null, schedule: null, summary: null, analysis: null };
 
     const schedule = this.build(setup);
     const months = new Map(this.store.listMonths().map((m) => [m.payment, m]));
@@ -360,6 +463,8 @@ export class LoanService {
     const paid = this.paidSet();
     const asset = this.asset(setup);
     const paidOn = new Map([...months.values()].filter((m) => m.status === 'paid').map((m) => [m.payment, m.transactionDate]));
+    const summary = summarize(setup, schedule, paid, today, asset);
+    const balanceAccount = base.settings.balanceAccountId;
     const rows: MonthView[] = schedule.rows.map((r) => {
       const m = months.get(r.payment);
       return {
@@ -387,7 +492,8 @@ export class LoanService {
         rows,
         currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null,
       },
-      summary: summarize(setup, schedule, paid, today, asset),
+      summary,
+      balanceCheck: balanceAccount ? checkBalance(summary.balance, this.linked.get(balanceAccount)) : null,
       analysis: {
         equity: asset ? analyzeEquity(setup, schedule, paid, today, asset) : null,
         periods: {
@@ -395,6 +501,7 @@ export class LoanService {
           scheduled: periodBreakouts(schedule.rows, paidOn, today, 'scheduled'),
         },
         escrow: escrowReport(schedule.rows, paidOn, this.store.listEscrowEntries(), today),
+        effectiveRate: effectiveRate(setup),
       },
     };
   }
@@ -414,6 +521,11 @@ export class LoanService {
       if (matched) {
         throw new HttpError(409, `Payment ${matched.payment} is already matched to a bank transaction. Undo it first, or start tracking before it.`);
       }
+      const startDue = dueDateFor(setup.firstPaymentDate, setup.paymentDay, start.payment);
+      const extra = this.store.listExtraPayments().find((e) => e.date <= startDue);
+      if (extra) {
+        throw new HttpError(409, `An extra payment on ${extra.date} is recorded before tracking would start. Remove it first, or start tracking before it.`);
+      }
       const changed = this.store.listAdjustments().find(({ adjustment: a }) => 'payment' in a && a.payment <= start.payment);
       if (changed && 'payment' in changed.adjustment) {
         throw new HttpError(
@@ -429,17 +541,29 @@ export class LoanService {
       if (createHome && this.loan.type === 'mortgage' && !this.root.assetForLoan(this.loan.id)) {
         this.root.createAsset({
           loanId: this.loan.id, name: 'Home', kind: 'home', originalValue: setup.originalHomeValue,
-          valueTrend: 'manual', trendRatePercent: null, acquiredDate: setup.openDate,
+          valueTrend: 'manual', trendRatePercent: null, acquiredDate: setup.openDate, actualAccountId: null,
         });
       }
     });
     return this.state();
   }
 
+  /**
+   * `{ categoryId, balanceAccountId? }`. A missing `categoryId` clears it, as
+   * before; `balanceAccountId` is only changed when it's given.
+   */
   saveSettings(body: unknown) {
     const b = (body ?? {}) as Record<string, unknown>;
     const categoryId = typeof b.categoryId === 'string' && b.categoryId ? b.categoryId : null;
-    this.store.saveSettings({ ...this.store.getSettings(), categoryId });
+    const settings: Pick<Settings, 'categoryId'> & Partial<Settings> = { categoryId };
+    if (b.balanceAccountId !== undefined) {
+      const id = b.balanceAccountId;
+      if (id !== null && !(typeof id === 'string' && id.length > 0 && id.length <= 200)) {
+        throw new HttpError(400, 'balanceAccountId must be an Actual account id, or null');
+      }
+      settings.balanceAccountId = id as string | null;
+    }
+    this.store.saveSettings(settings);
     return this.store.getSettings();
   }
 
@@ -469,6 +593,7 @@ export class LoanService {
           matchesSchedule: cmp.matches,
           difference: cmp.difference,
           usedByPayment: usedBy === payment ? null : usedBy,
+          usedByExtra: this.store.extraForTransaction(t.id),
         };
       })
       .sort((a, b) => Number(b.matchesSchedule) - Number(a.matchesSchedule) || a.date.localeCompare(b.date));
@@ -487,6 +612,9 @@ export class LoanService {
     const usedBy = this.store.monthForTransaction(transactionId);
     if (usedBy !== null && usedBy !== payment) {
       throw new HttpError(409, `That transaction is already matched to payment ${usedBy}`);
+    }
+    if (this.store.extraForTransaction(transactionId) !== null) {
+      throw new HttpError(409, 'That transaction is already recorded as an extra payment. Remove the extra payment first.');
     }
 
     const cat = this.categoryOrThrow(b.categoryId);
@@ -585,6 +713,199 @@ export class LoanService {
       this.store.deleteManualOffset(payment);
       if (amount !== 0) this.store.addAdjustment({ kind: 'pennyOffset', payment, amount: amount as number }, null);
     });
+    return this.state();
+  }
+
+  // --- extra payments of their own ------------------------------------------------
+
+  /**
+   * Record extra principal paid in a transaction of its own. Either
+   * `{ transactionId, payment, categoryId? }`, a bank transaction found near
+   * payment `payment`'s due date, or `{ date, amount, note? }` entered by
+   * hand. It applies on its own date; later months recalculate.
+   */
+  async addExtraPayment(body: unknown) {
+    const b = bodyOf(body);
+    const setup = this.requireSetup();
+    const schedule = this.build(setup);
+    let extra: Omit<StoredExtraPayment, 'id' | 'createdAt'>;
+
+    if (b.transactionId !== undefined) {
+      const transactionId = typeof b.transactionId === 'string' ? b.transactionId : '';
+      if (!transactionId) throw new HttpError(400, 'transactionId must be a transaction id');
+      const near = this.row(schedule, Number.isInteger(b.payment) ? (b.payment as number) : Number.NaN);
+      if (this.store.extraForTransaction(transactionId) !== null) throw new HttpError(409, 'That transaction is already recorded as an extra payment');
+      const usedBy = this.store.monthForTransaction(transactionId);
+      if (usedBy !== null) throw new HttpError(409, `That transaction is already matched to payment ${usedBy}. Undo that first.`);
+      const cat = this.categoryOrThrow(b.categoryId);
+      const txn = (await this.fetchAround(cat, near.dueDate, WIDE_WINDOW, WIDE_WINDOW)).find((t) => t.id === transactionId);
+      if (!txn) throw new HttpError(404, "That transaction was not found in this loan's category near this due date");
+      if (txn.amount >= 0) throw new HttpError(400, 'That transaction is a deposit, not a payment');
+      extra = { date: txn.date, amount: -txn.amount, transactionId: txn.id, transactionPayee: txn.payee, note: '' };
+    } else {
+      extra = { date: dateField(b, 'date'), amount: amountField(b, 'amount'), transactionId: null, transactionPayee: null, note: textField(b, 'note', 200) };
+    }
+
+    if (extra.date < setup.openDate) throw new HttpError(400, 'An extra payment has to be on or after the loan open date');
+    const start = setup.startingPoint;
+    if (start && extra.date <= dueDateFor(setup.firstPaymentDate, setup.paymentDay, start.payment)) {
+      throw new HttpError(409, 'That date is before tracking starts; the starting balance already includes anything paid then');
+    }
+
+    this.root.transaction(() => {
+      const id = this.store.addExtraPayment(extra);
+      // The schedule never lets an extra overpay the loan; refuse one that would.
+      const applied = this.build(setup).rows.flatMap((r) => r.extraPaymentList).find((e) => e.id === id);
+      if (!applied || applied.amount < extra.amount) {
+        throw new HttpError(400, "That's more than the balance left on that date. Record only what went to principal.");
+      }
+    });
+    return this.state();
+  }
+
+  /** Remove one extra payment. Every other one, and every reconciled month, stays as it is. */
+  deleteExtraPayment(id: number) {
+    if (!this.store.deleteExtraPayment(id)) throw new HttpError(404, 'That extra payment is not on file');
+    return this.state();
+  }
+
+  // --- the lender's amortization table -----------------------------------------------
+
+  /**
+   * What importing these months would do, without saving: for each one, the
+   * interest and principal now and from the lender, and whether it applies
+   * (a reconciled, skipped or pre-tracking month keeps what it has). Also
+   * compares the balance after the last imported month with the lender's.
+   */
+  previewBankSchedule(body: unknown): BankPreview {
+    const rows = parseBankRows(body);
+    const setup = this.requireSetup();
+    const before = this.build(setup);
+    const options = this.options();
+    const merged = new Map(options.bankRows);
+    for (const r of rows) merged.set(r.payment, { principal: r.principal, interest: r.interest });
+    let after: Schedule;
+    try {
+      after = generateSchedule(setup, { ...options, bankRows: merged });
+    } catch (e) {
+      if (e instanceof SetupError) throw new HttpError(400, `With that table the schedule can't be built: ${e.message}`, { problems: e.problems });
+      throw e;
+    }
+    const months = new Map(this.store.listMonths().map((m) => [m.payment, m]));
+    const preview = rows.map((r) => {
+      const now = before.rows[r.payment - 1];
+      const then = after.rows[r.payment - 1];
+      const note = !now
+        ? 'Not on the schedule'
+        : now.beforeTracking
+          ? 'Before tracking began'
+          : months.get(r.payment)?.status === 'paid'
+            ? 'Reconciled: keeps what it paid'
+            : now.skipped
+              ? 'Skipped month'
+              : null;
+      return {
+        payment: r.payment,
+        dueDate: now?.dueDate ?? r.dueDate,
+        bank: r,
+        now: now ? { interest: now.interest, principal: now.scheduledPrincipal, endingBalance: now.endingBalance } : null,
+        then: then ? { interest: then.interest, principal: then.scheduledPrincipal, endingBalance: then.endingBalance } : null,
+        applies: note === null,
+        note,
+      };
+    });
+    const lastWithBalance = [...preview].reverse().find((p) => p.applies && p.bank.balance !== null && p.then);
+    return {
+      rows: preview,
+      applies: preview.filter((p) => p.applies).length,
+      balanceCheck: lastWithBalance
+        ? { payment: lastWithBalance.payment, bank: lastWithBalance.bank.balance!, tracker: lastWithBalance.then!.endingBalance }
+        : null,
+      payoffDate: { now: before.rows.at(-1)?.dueDate ?? null, then: after.rows.at(-1)?.dueDate ?? null },
+    };
+  }
+
+  /** Save months from the lender's table, replacing any already imported for the same payments. */
+  saveBankSchedule(body: unknown) {
+    const rows = parseBankRows(body);
+    const setup = this.requireSetup();
+    this.root.transaction(() => {
+      this.store.saveBankRows(rows);
+      this.build(setup); // a table the schedule can't follow rolls back
+    });
+    return this.state();
+  }
+
+  /** Remove one imported month (it goes back to the calculation), or all of them. */
+  deleteBankSchedule(payment?: number) {
+    if (!this.store.deleteBankRows(payment) && payment !== undefined) throw new HttpError(404, `Payment ${payment} has no imported row`);
+    return this.state();
+  }
+
+  // --- what-if ------------------------------------------------------------------------
+
+  /**
+   * Try a monthly extra and/or a lump sum against the real schedule, from the
+   * next payment not yet paid. Read-only: nothing is saved.
+   * `{ monthlyExtra?, lumpSum?: { date, amount } | null, dates?: [] }`
+   */
+  whatIf(body: unknown): WhatIfResult {
+    const b = bodyOf(body);
+    const setup = this.requireSetup();
+    const monthlyExtra = b.monthlyExtra === undefined ? 0 : amountField(b, 'monthlyExtra', { allowZero: true });
+    let lumpSum: WhatIfInput['lumpSum'] = null;
+    if (b.lumpSum !== undefined && b.lumpSum !== null) {
+      const l = bodyOf(b.lumpSum);
+      lumpSum = { date: dateField(l, 'date'), amount: amountField(l, 'amount') };
+      if (lumpSum.date < setup.openDate) throw new HttpError(400, 'The lump sum has to be on or after the loan open date');
+    }
+    const today = this.today();
+    const dates = b.dates === undefined ? [1, 5, 10].map((y) => addYears(today, y)) : b.dates;
+    if (!Array.isArray(dates) || dates.length > 6 || !dates.every((d) => isValidISODate(d))) {
+      throw new HttpError(400, 'dates must be a list of up to 6 dates like 2030-01-01');
+    }
+    const fromPayment = this.nextUnpaid(setup);
+    try {
+      return whatIf(setup, this.options(), { monthlyExtra, fromPayment, lumpSum, dates: dates as ISODate[] }, this.asset(setup));
+    } catch (e) {
+      if (e instanceof SetupError) throw new HttpError(400, e.message, { problems: e.problems });
+      throw e;
+    }
+  }
+
+  /** The next payment not yet reconciled, skipped or made before tracking: where a new standing extra starts. */
+  private nextUnpaid(setup: LoanSetup): number {
+    const paid = this.paidSet();
+    const row = this.build(setup).rows.find((r) => !r.beforeTracking && !r.skipped && !paid.has(r.payment) && !this.store.getMonth(r.payment));
+    if (!row) throw new HttpError(409, 'Every payment is already made');
+    return row.payment;
+  }
+
+  /**
+   * "Make this my standing extra": pay `amount` more with every payment from
+   * the next unpaid one on, on top of any standing extra already in place.
+   * Reconciled months keep what they paid. Undo with deleteStandingExtra.
+   */
+  setStandingExtra(body: unknown) {
+    const b = bodyOf(body);
+    const amount = amountField(b, 'amount');
+    const setup = this.requireSetup();
+    const fromPayment = this.nextUnpaid(setup);
+    const existing = this.store.listAdjustments().map((a) => a.adjustment);
+    this.root.transaction(() => {
+      this.store.addAdjustment({ kind: 'standingExtra', fromPayment, amount: standingExtraAt(setup, existing, fromPayment) + amount }, null);
+      this.build(setup);
+    });
+    return this.state();
+  }
+
+  /** Remove a standing extra set from the what-if screen (one set while reconciling goes with its month). */
+  deleteStandingExtra(id: number) {
+    const found = this.store.listAdjustments().find((a) => a.id === id);
+    if (!found || found.adjustment.kind !== 'standingExtra' || found.sourcePayment !== null) {
+      throw new HttpError(404, 'That standing extra is not on file');
+    }
+    this.store.deleteAdjustment(id);
     return this.state();
   }
 
@@ -768,7 +1089,7 @@ function nicknameField(b: Record<string, unknown>): string {
 }
 
 function loanTypeField(v: unknown): LoanType {
-  if (!LOAN_TYPES.includes(v as LoanType)) throw new HttpError(400, 'type must be mortgage, auto or personal');
+  if (!LOAN_TYPES.includes(v as LoanType)) throw new HttpError(400, 'type must be mortgage, auto, personal or student');
   return v as LoanType;
 }
 
@@ -791,6 +1112,10 @@ export function parseAsset(body: unknown, current?: AssetInput): Omit<AssetInput
   }
   const acquired = merged.acquiredDate ?? null;
   if (acquired !== null && !isValidISODate(acquired)) throw new HttpError(400, 'acquiredDate must be a date like 2026-11-01, or null');
+  const account = merged.actualAccountId ?? null;
+  if (account !== null && !(typeof account === 'string' && account.length > 0 && account.length <= 200)) {
+    throw new HttpError(400, 'actualAccountId must be an Actual account id, or null');
+  }
   return {
     name,
     kind: merged.kind as AssetKind,
@@ -798,6 +1123,7 @@ export function parseAsset(body: unknown, current?: AssetInput): Omit<AssetInput
     valueTrend: trend,
     trendRatePercent: trend === 'manual' ? null : (rate as number | null),
     acquiredDate: acquired as ISODate | null,
+    actualAccountId: account as string | null,
   };
 }
 
@@ -806,11 +1132,34 @@ export function parseAsset(body: unknown, current?: AssetInput): Omit<AssetInput
  * the read-only summaries. Per-loan work is done by `LoanService`.
  */
 export class TrackerService {
+  /** Balances of linked Actual accounts, shared by every loan. */
+  private readonly linked: LinkedAccounts;
+
   constructor(
     private readonly store: Store,
     private readonly source: BudgetSource,
     private readonly today: () => ISODate,
-  ) {}
+  ) {
+    this.linked = new LinkedAccounts(source);
+  }
+
+  private service(loan: LoanRecord): LoanService {
+    return new LoanService(this.store, this.source, this.today, loan, this.linked);
+  }
+
+  /**
+   * Read the balances of every Actual account linked to an asset or a loan's cross-check. Call it
+   * before reading state or summaries; with no links it asks Actual nothing,
+   * and it never throws (a failure falls back to the values entered here).
+   */
+  async refreshLinked(): Promise<void> {
+    await this.linked.refresh(this.store.linkedAccountIds(), this.today());
+  }
+
+  /** The budget's accounts, to pick one to link. */
+  accounts(): Promise<BudgetAccount[]> {
+    return this.source.getAccounts();
+  }
 
   sourceStatus(): SourceStatus {
     return this.source.status();
@@ -831,12 +1180,12 @@ export class TrackerService {
   loan(id: number): LoanService {
     const loan = this.store.getLoan(id);
     if (!loan) throw new HttpError(404, `There is no loan ${id}`);
-    return new LoanService(this.store, this.source, this.today, loan);
+    return this.service(loan);
   }
 
   loans(): LoanListItem[] {
     return this.store.listLoans().map((loan) => {
-      const svc = new LoanService(this.store, this.source, this.today, loan);
+      const svc = this.service(loan);
       const asset = this.store.assetForLoan(loan.id);
       const item: LoanListItem = {
         loan,
@@ -880,7 +1229,7 @@ export class TrackerService {
       const created = this.store.createLoan({ nickname, type });
       if (asset) this.store.createAsset({ ...asset, loanId: created.id });
       if (setup) {
-        const svc = new LoanService(this.store, this.source, this.today, created);
+        const svc = this.service(created);
         // Builds the schedule first, so a setup that can't be scheduled rolls everything back.
         svc.saveSetup(setup, { createHome: b.asset !== null });
       }
@@ -1014,7 +1363,7 @@ export class TrackerService {
       .listLoans()
       .filter((l) => !l.archived)
       .flatMap((loan) => {
-        const summary = new LoanService(this.store, this.source, this.today, loan).summary();
+        const summary = this.service(loan).summary();
         return summary ? [{ loan, summary }] : [];
       });
   }

@@ -13,7 +13,7 @@ interface Props {
   onCancel?(): void;
 }
 
-const TYPES: LoanType[] = ['mortgage', 'auto', 'personal'];
+const TYPES: LoanType[] = ['mortgage', 'auto', 'personal', 'student'];
 
 /** Default yearly depreciation offered for vehicles. Clearly an estimate; editable. */
 const VEHICLE_DEPRECIATION = '15';
@@ -139,7 +139,7 @@ function Details({ type, nickname, setNickname, asset, setAsset, onBack, onCreat
         </span>
       </div>
       <div className="mt-card">
-        <h3>{type === 'personal' ? 'Name' : `Name & ${ASSET_KIND_LABEL[kind].toLowerCase()}`}</h3>
+        <h3>{info.assetKind === null ? 'Name' : `Name & ${ASSET_KIND_LABEL[kind].toLowerCase()}`}</h3>
         <div className="mt-form-section">
           <div className="mt-field">
             <label htmlFor="mt-nickname">Nickname</label>
@@ -147,7 +147,7 @@ function Details({ type, nickname, setNickname, asset, setAsset, onBack, onCreat
             <div className="hint">How the loan shows up in the picker and the sidebar.</div>
           </div>
         </div>
-        {type === 'personal' && (
+        {info.assetKind === null && (
           <label className="mt-row" style={{ cursor: 'pointer', marginTop: 14 }}>
             <input type="checkbox" checked={asset.track} onChange={(e) => set({ track: e.target.checked, name: asset.name || 'Asset' })} />
             This loan paid for something whose value I want to track (a boat, equipment…)

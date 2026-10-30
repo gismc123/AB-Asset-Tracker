@@ -42,7 +42,7 @@ function sectionsFor(type: LoanType, pmi: boolean): { title: string; fields: Fie
       },
     ];
   }
-  if (type === 'personal') {
+  if (type === 'personal' || type === 'student') {
     return [
       { title: 'Lender', fields: SERVICER },
       { title: 'Loan', fields: [{ key: 'lenderName', label: 'Original lender', placeholder: 'If different from the servicer' }] },

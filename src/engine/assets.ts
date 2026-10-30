@@ -80,3 +80,56 @@ export function projectedValue(asset: Asset, date: ISODate, fallbackStart: ISODa
   const rate = (asset.trendRatePercent! / 100) * (asset.valueTrend === 'depreciating' ? -1 : 1);
   return Math.max(0, Math.round(base.value * Math.pow(1 + rate, years)));
 }
+
+/** A balance read from an account in Actual, for an asset linked to it. */
+export interface AccountReading {
+  id: string;
+  /** Null until the account has been found in the budget. */
+  name: string | null;
+  /** Actual's signed balance in cents (assets positive, debts negative). Null until read. */
+  balance: Cents | null;
+  /** The day the balance was read for. */
+  asOf: ISODate | null;
+  /** Why the latest read failed. A balance read earlier may still be there. */
+  error: string | null;
+}
+
+/** Where an asset's value comes from right now. */
+export interface AssetValueSource {
+  /** `account`: the linked Actual account's balance. `entered`: the values entered in the tracker (or the original value). */
+  active: 'account' | 'entered';
+  /** The linked account, when there is one. */
+  account: AccountReading | null;
+  /** Why the linked account isn't used, or why its balance may be out of date. */
+  problem: string | null;
+}
+
+/** The source text a value read from an account carries. */
+export const ACCOUNT_VALUE_SOURCE = 'Actual account';
+
+/**
+ * The asset as equity sees it, when it may be linked to an account. With a
+ * balance that could be read and isn't negative, that balance becomes the
+ * newest value, dated the day it was read. Otherwise the values entered in
+ * the tracker are used, and `problem` says why.
+ */
+export function withAccountValue<A extends Asset>(asset: A, reading: AccountReading | null): { asset: A; source: AssetValueSource } {
+  if (!reading) return { asset, source: { active: 'entered', account: null, problem: null } };
+  if (reading.balance === null || reading.asOf === null) {
+    return { asset, source: { active: 'entered', account: reading, problem: reading.error ?? 'Not read from Actual yet' } };
+  }
+  if (reading.balance < 0) {
+    return {
+      asset,
+      source: {
+        active: 'entered',
+        account: reading,
+        problem: "The account's balance is negative, so it can't be this asset's value. The values entered here are used instead.",
+      },
+    };
+  }
+  return {
+    asset: { ...asset, values: [...asset.values, { date: reading.asOf, value: reading.balance, source: ACCOUNT_VALUE_SOURCE }] },
+    source: { active: 'account', account: reading, problem: reading.error },
+  };
+}

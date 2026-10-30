@@ -9,6 +9,7 @@ import {
   validateSetup,
   type InterestMethod,
   type LoanSetup,
+  type OneOffFee,
   type PmiRemovalRule,
 } from '../../engine/index.js';
 import type { LoanType } from '../api.js';
@@ -45,8 +46,31 @@ type Draft = Record<
   escrowOn: boolean;
   interestMethod: InterestMethod;
   yearlyFeeBasis: 'none' | 'original' | 'balance';
-  fees: { label: string; amount: string; financed: boolean }[];
+  yearlyFeeCollect: 'payment' | 'separately';
+  fees: FeeDraft[];
 };
+
+/** How a one-off fee was charged (see `OneOffFee`). */
+type FeeHow = 'upfront' | 'financed' | 'separate' | 'added';
+interface FeeDraft {
+  label: string;
+  amount: string;
+  how: FeeHow;
+  date: string;
+}
+
+const FEE_HOW: { value: FeeHow; label: string }[] = [
+  { value: 'upfront', label: 'Paid at opening' },
+  { value: 'financed', label: 'In the amount borrowed' },
+  { value: 'separate', label: 'Paid separately on…' },
+  { value: 'added', label: 'Added to balance on…' },
+];
+
+function feeHow(f: OneOffFee): FeeHow {
+  if (f.financed) return 'financed';
+  if (f.addedToBalance) return 'added';
+  return f.date ? 'separate' : 'upfront';
+}
 
 const canDate = (first: string, day: number) => isValidISODate(first) && Number.isInteger(day) && day >= 1 && day <= 31;
 
@@ -68,7 +92,7 @@ function toDraft(s: LoanSetup | null, type: LoanType): Draft {
     originalAmount: centsToInput(s?.originalAmount),
     annualRatePercent: s ? String(s.annualRatePercent) : '',
     termYears: s ? String(s.termYears) : '30',
-    termMonths: s ? String(termMonthsOf(s)) : type === 'auto' ? '60' : '36',
+    termMonths: s ? String(termMonthsOf(s)) : type === 'auto' ? '60' : type === 'student' ? '120' : '36',
     openDate: s?.openDate ?? '',
     firstPaymentDate: s?.firstPaymentDate ?? '',
     paymentDay: s ? String(s.paymentDay) : '1',
@@ -83,8 +107,9 @@ function toDraft(s: LoanSetup | null, type: LoanType): Draft {
     escrowOn: modules.escrow,
     interestMethod: s?.interestMethod ?? 'monthly',
     downPayment: centsToInput(s?.downPayment),
-    fees: (s?.fees ?? []).map((f) => ({ label: f.label, amount: centsToInput(f.amount), financed: f.financed })),
+    fees: (s?.fees ?? []).map((f) => ({ label: f.label, amount: centsToInput(f.amount), how: feeHow(f), date: f.date ?? '' })),
     yearlyFeeBasis: s?.yearlyFee ? s.yearlyFee.basis : 'none',
+    yearlyFeeCollect: s?.yearlyFee?.collect ?? 'payment',
     yearlyFeePercent: s?.yearlyFee ? String(s.yearlyFee.percent) : '',
     quoteAmount: centsToInput(s?.payoffQuote?.amount),
     quoteDate: s?.payoffQuote?.goodThrough ?? '',
@@ -122,8 +147,20 @@ function fromDraft(d: Draft, type: LoanType, homeValueFromAsset: number | null |
     downPayment: d.downPayment.trim() ? cents(d.downPayment) : null,
     fees: d.fees
       .filter((f) => f.label.trim() || f.amount.trim())
-      .map((f) => ({ label: f.label.trim(), amount: cents(f.amount), financed: f.financed })),
-    yearlyFee: d.yearlyFeeBasis === 'none' ? null : { basis: d.yearlyFeeBasis, percent: d.yearlyFeePercent.trim() ? Number(d.yearlyFeePercent) : Number.NaN },
+      .map((f) => {
+        const fee: OneOffFee = { label: f.label.trim(), amount: cents(f.amount), financed: f.how === 'financed' };
+        if (f.how === 'separate' || f.how === 'added') fee.date = f.date || 'missing';
+        if (f.how === 'added') fee.addedToBalance = true;
+        return fee;
+      }),
+    yearlyFee:
+      d.yearlyFeeBasis === 'none'
+        ? null
+        : {
+            basis: d.yearlyFeeBasis,
+            percent: d.yearlyFeePercent.trim() ? Number(d.yearlyFeePercent) : Number.NaN,
+            ...(d.yearlyFeeCollect === 'separately' ? { collect: 'separately' as const } : {}),
+          },
     payoffQuote: d.quoteAmount.trim() || d.quoteDate ? { amount: cents(d.quoteAmount), goodThrough: d.quoteDate } : null,
   };
   if (!mortgage) setup.termMonths = months;
@@ -191,6 +228,7 @@ const PLACEHOLDERS: Record<LoanType, { amount: string; rate: string }> = {
   mortgage: { amount: '320,000.00', rate: '6.5' },
   auto: { amount: '30,000.00', rate: '6.9' },
   personal: { amount: '12,000.00', rate: '11.5' },
+  student: { amount: '27,000.00', rate: '5.5' },
 };
 
 /** Loan setup for any loan type. Previews the payment (and PMI dates) as you type. */
@@ -314,7 +352,7 @@ export function SetupForm({ type, initial, hasReconciled, onSave, header, header
           <Field id="interestMethod" label="Interest" hint={d.interestMethod === 'daily' ? 'Interest for the days since the last payment, using the date your bank paid.' : 'One twelfth of the yearly rate each month.'}>
             <select id="mt-interestMethod" className="mt-select" style={{ width: '100%' }} value={d.interestMethod} onChange={(e) => setD((p) => ({ ...p, interestMethod: e.target.value as InterestMethod }))}>
               <option value="monthly">Monthly (most mortgages)</option>
-              <option value="daily">Daily simple interest (many car and personal loans)</option>
+              <option value="daily">Daily simple interest (many car, personal and student loans)</option>
             </select>
           </Field>
         </div>
@@ -409,19 +447,28 @@ export function SetupForm({ type, initial, hasReconciled, onSave, header, header
                   <span>$</span>
                   <input className="mt-input" aria-label="Fee amount" inputMode="decimal" value={f.amount} onChange={(e) => setFee(i, { amount: e.target.value })} />
                 </div>
-                <label className="mt-row" style={{ fontWeight: 400 }}>
-                  <input type="checkbox" checked={f.financed} onChange={(e) => setFee(i, { financed: e.target.checked })} />
-                  Added to the loan
-                </label>
+                <select className="mt-select" style={{ width: '100%', minWidth: 0 }} aria-label="How it was charged" value={f.how} onChange={(e) => setFee(i, { how: e.target.value as FeeHow })}>
+                  {FEE_HOW.map((h) => (
+                    <option key={h.value} value={h.value}>{h.label}</option>
+                  ))}
+                </select>
+                {(f.how === 'separate' || f.how === 'added') ? (
+                  <input type="date" className="mt-input" aria-label="Fee date" value={f.date} onChange={(e) => setFee(i, { date: e.target.value })} />
+                ) : (
+                  <span />
+                )}
                 <button type="button" className="mt-x" aria-label="Remove this fee" onClick={() => setD((p) => ({ ...p, fees: p.fees.filter((_, k) => k !== i) }))}>
                   ✕
                 </button>
               </div>
             ))}
-            <button type="button" className="mt-btn small" onClick={() => setD((p) => ({ ...p, fees: [...p.fees, { label: '', amount: '', financed: false }] }))}>
+            <button type="button" className="mt-btn small" onClick={() => setD((p) => ({ ...p, fees: [...p.fees, { label: '', amount: '', how: 'upfront', date: '' }] }))}>
               Add a fee
             </button>
-            <div className="hint">Processing, origination, credit insurance and the like, paid once. Counted in the cost of the loan.</div>
+            <div className="hint">
+              Processing, origination, credit insurance, a late charge: anything charged once. Paid separately, it's on the schedule
+              and in the totals but never in the payment. Added to the balance, interest accrues on it and the loan runs a little longer.
+            </div>
           </div>
           <div className="mt-form-section" style={{ marginTop: 14 }}>
             <Field id="yearlyFeeBasis" label="Yearly fee" hint="Charged with the first payment of each loan year.">
@@ -437,6 +484,14 @@ export function SetupForm({ type, initial, hasReconciled, onSave, header, header
                   <input id="mt-yearlyFeePercent" className="mt-input" inputMode="decimal" value={d.yearlyFeePercent} placeholder="0.5" onChange={(e) => set('yearlyFeePercent')(e.target.value)} />
                   <span>%</span>
                 </div>
+              </Field>
+            )}
+            {d.yearlyFeeBasis !== 'none' && (
+              <Field id="yearlyFeeCollect" label="Yearly fee is" hint={d.yearlyFeeCollect === 'payment' ? 'The bank payment that month includes it.' : 'Billed on its own; the payment you reconcile leaves it out.'}>
+                <select id="mt-yearlyFeeCollect" className="mt-select" style={{ width: '100%' }} value={d.yearlyFeeCollect} onChange={(e) => setD((p) => ({ ...p, yearlyFeeCollect: e.target.value as Draft['yearlyFeeCollect'] }))}>
+                  <option value="payment">In the monthly payment</option>
+                  <option value="separately">Charged separately</option>
+                </select>
               </Field>
             )}
             <Money id="quoteAmount" label="Payoff quote" value={d.quoteAmount} onChange={set('quoteAmount')} hint="From your lender. Used instead of the estimate until it expires." />
