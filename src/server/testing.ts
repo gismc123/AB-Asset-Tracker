@@ -37,8 +37,22 @@ export const AUTO_SETUP: LoanSetup = {
   modules: { pmi: false, escrow: false },
 };
 
+/** Made-up sample student loan: 10 years, daily simple interest, no asset. Not real numbers. */
+export const STUDENT_SETUP: LoanSetup = {
+  ...AUTO_SETUP,
+  originalAmount: 2_700_000,
+  annualRatePercent: 5.5,
+  termYears: 10,
+  termMonths: 120,
+  openDate: '2025-01-15',
+  firstPaymentDate: '2025-02-15',
+  paymentDay: 15,
+  interestMethod: 'daily',
+};
+
 export const MORTGAGE_CATEGORY = 'cat-mortgage';
 export const CAR_CATEGORY = 'cat-car';
+export const STUDENT_CATEGORY = 'cat-student';
 
 /** In-memory stand-in for Actual. */
 export class FakeSource implements BudgetSource {
@@ -59,6 +73,7 @@ export class FakeSource implements BudgetSource {
         ],
       },
       { id: 'grp-transport', name: 'Transportation', categories: [{ id: CAR_CATEGORY, name: 'Car payment' }] },
+      { id: 'grp-debt', name: 'Debt', categories: [{ id: STUDENT_CATEGORY, name: 'Student loan' }] },
     ];
   }
 

@@ -203,6 +203,30 @@ describe('upgrading a v0.1.0 database', () => {
     store.close();
   });
 
+  it('allows student loans, keeps loan ids, and never reuses a deleted loan\'s id', () => {
+    const file = v010File();
+    const raw = new Database(file);
+    // Deleted under v0.1.0: AUTOINCREMENT remembers id 4 was used.
+    raw.pragma('foreign_keys = ON');
+    raw.prepare(`DELETE FROM loans WHERE id = 4`).run();
+    raw.close();
+
+    const backups: string[] = [];
+    const store = new Store(file, { onBackup: (f) => backups.push(f) });
+    expect(backups).toHaveLength(1);
+    expect(store.listLoans().map((l) => [l.id, l.type])).toEqual([[1, 'mortgage'], [2, 'auto'], [3, 'personal']]);
+    // Rows that pointed at the loans still do, and cascades still work.
+    expect(store.db.pragma('foreign_key_check')).toEqual([]);
+    const student = store.createLoan({ nickname: 'Student loan', type: 'student' });
+    expect(student.id).toBe(5);
+    expect(store.loan(2).listMonths().length).toBeGreaterThan(0);
+    store.deleteLoan(2);
+    expect(store.loan(2).listMonths()).toEqual([]);
+    expect(store.db.prepare(`SELECT loan_id FROM assets WHERE id = 2`).get()).toEqual({ loan_id: null });
+    expect(() => store.createLoan({ nickname: 'Boat', type: 'boat' as never })).toThrow(/CHECK/);
+    store.close();
+  });
+
   it('leaves every v0.1.0 row as it was', () => {
     const file = v010File();
     const old = new Database(file, { readonly: true });

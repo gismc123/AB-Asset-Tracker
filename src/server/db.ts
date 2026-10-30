@@ -26,8 +26,8 @@ import { migrate } from './migrations.js';
  * date, amount and payee, kept so the month can show what it was matched to.
  */
 
-export type LoanType = 'mortgage' | 'auto' | 'personal';
-export const LOAN_TYPES: LoanType[] = ['mortgage', 'auto', 'personal'];
+export type LoanType = 'mortgage' | 'auto' | 'personal' | 'student';
+export const LOAN_TYPES: LoanType[] = ['mortgage', 'auto', 'personal', 'student'];
 
 export interface LoanRecord {
   id: number;

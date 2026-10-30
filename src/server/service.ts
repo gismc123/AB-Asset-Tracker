@@ -768,7 +768,7 @@ function nicknameField(b: Record<string, unknown>): string {
 }
 
 function loanTypeField(v: unknown): LoanType {
-  if (!LOAN_TYPES.includes(v as LoanType)) throw new HttpError(400, 'type must be mortgage, auto or personal');
+  if (!LOAN_TYPES.includes(v as LoanType)) throw new HttpError(400, 'type must be mortgage, auto, personal or student');
   return v as LoanType;
 }
 

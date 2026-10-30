@@ -68,7 +68,7 @@ function toDraft(s: LoanSetup | null, type: LoanType): Draft {
     originalAmount: centsToInput(s?.originalAmount),
     annualRatePercent: s ? String(s.annualRatePercent) : '',
     termYears: s ? String(s.termYears) : '30',
-    termMonths: s ? String(termMonthsOf(s)) : type === 'auto' ? '60' : '36',
+    termMonths: s ? String(termMonthsOf(s)) : type === 'auto' ? '60' : type === 'student' ? '120' : '36',
     openDate: s?.openDate ?? '',
     firstPaymentDate: s?.firstPaymentDate ?? '',
     paymentDay: s ? String(s.paymentDay) : '1',
@@ -191,6 +191,7 @@ const PLACEHOLDERS: Record<LoanType, { amount: string; rate: string }> = {
   mortgage: { amount: '320,000.00', rate: '6.5' },
   auto: { amount: '30,000.00', rate: '6.9' },
   personal: { amount: '12,000.00', rate: '11.5' },
+  student: { amount: '27,000.00', rate: '5.5' },
 };
 
 /** Loan setup for any loan type. Previews the payment (and PMI dates) as you type. */
@@ -314,7 +315,7 @@ export function SetupForm({ type, initial, hasReconciled, onSave, header, header
           <Field id="interestMethod" label="Interest" hint={d.interestMethod === 'daily' ? 'Interest for the days since the last payment, using the date your bank paid.' : 'One twelfth of the yearly rate each month.'}>
             <select id="mt-interestMethod" className="mt-select" style={{ width: '100%' }} value={d.interestMethod} onChange={(e) => setD((p) => ({ ...p, interestMethod: e.target.value as InterestMethod }))}>
               <option value="monthly">Monthly (most mortgages)</option>
-              <option value="daily">Daily simple interest (many car and personal loans)</option>
+              <option value="daily">Daily simple interest (many car, personal and student loans)</option>
             </select>
           </Field>
         </div>

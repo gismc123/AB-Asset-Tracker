@@ -95,3 +95,14 @@ decided by the maintainer; the rest are defaults that can be revisited.
 
 - **Migration golden files come from the last single-loan release, stored gzipped under `test/fixtures`.** They prove behavior to the cent and stay out of the Docker image.
 - **Screenshots are generated from `dist/ui/preview.html` with Playwright at 1360 px wide.** Reproducible and always made-up data.
+
+## v0.2.0
+
+Defaults chosen while adding the v0.2.0 features. None of them changes the
+numbers of a loan saved by v0.1.0; each new option is off until chosen.
+
+### Loan types
+
+- **Student loans are their own type, `student`, with no asset, PMI or escrow, like a personal loan.** A type of its own lets the picker, the sidebar icon and the summary endpoint say what the loan is. Dashboards may now see `type: "student"`; no existing value changed.
+- **Migration 3 rebuilds the `loans` table to widen its type check, keeping every id and the AUTOINCREMENT counter.** SQLite can't change a CHECK in place; keeping the counter means a deleted loan's id is never handed to a new loan, so a dashboard's `?loan=<id>` can't silently point somewhere else.
+- **A new student loan defaults to 120 monthly payments and monthly interest.** Ten years is the common standard plan; monthly interest stays the default for every type (the field's hint says many student loans use daily interest).

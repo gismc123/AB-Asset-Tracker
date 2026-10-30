@@ -247,6 +247,38 @@ export const MIGRATIONS: Migration[] = [
       db.exec(FINISH_MULTI_LOAN);
     },
   },
+  {
+    version: 3,
+    description: 'Student loans: allow loan type student',
+    up(db) {
+      const sql = (db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'loans'`).get() as { sql: string }).sql;
+      if (sql.includes(`'student'`)) return;
+      // SQLite can't change a CHECK constraint in place, so the table is
+      // rebuilt as its documented procedure says. Foreign keys are off while
+      // migrations run, so dropping the old table cascades nothing, and the
+      // other tables' references point at the new one once it is renamed.
+      const before = count(db, 'loans');
+      const seq = db.prepare(`SELECT seq FROM sqlite_sequence WHERE name = 'loans'`).get() as { seq: number } | undefined;
+      db.exec(`
+        CREATE TABLE loans_v3 (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          nickname   TEXT NOT NULL,
+          type       TEXT NOT NULL CHECK (type IN ('mortgage', 'auto', 'personal', 'student')),
+          created_at TEXT NOT NULL,
+          archived   INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))
+        );
+        INSERT INTO loans_v3 (id, nickname, type, created_at, archived) SELECT id, nickname, type, created_at, archived FROM loans;
+        DROP TABLE loans;
+        ALTER TABLE loans_v3 RENAME TO loans;
+      `);
+      if (count(db, 'loans') !== before) throw new Error('Migration 3 copied a different number of loans than it found');
+      // Keep AUTOINCREMENT's high-water mark, so the id of a deleted loan is never reused.
+      if (seq) {
+        db.prepare(`DELETE FROM sqlite_sequence WHERE name = 'loans'`).run();
+        db.prepare(`INSERT INTO sqlite_sequence (name, seq) VALUES ('loans', ?)`).run(seq.seq);
+      }
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)!.version;
