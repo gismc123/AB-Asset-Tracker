@@ -143,3 +143,13 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 
 - **Shipped: daily accrual per loan, off by default (monthly).** It existed in v0.1.0; v0.2.0 adds dated extra payments, so a mid-month extra cuts interest only for the days after it. A three-period example worked by hand (with an extra and an early payment) is a test, to the cent.
 - **Within a period with extras, balance-days are summed and rounded once.** With no extra this is exactly v0.1.0's single rounding, so existing daily loans keep every cent.
+
+### Fees
+
+- **One-off fees gain an optional date and "added to the balance"; existing fees keep their shape and meaning.** An undated fee is still paid at opening, `financed` still means it's in the amount borrowed. The new keys are only written when used, so a v0.1.0 setup saves byte for byte the same.
+- **A dated fee paid separately is shown on the month its date falls in and counted in the totals, but is never part of the payment or the balance.** The regular payment still matches the bank; the fee is visible.
+- **A fee added to the balance needs a date after the loan was opened.** One added at opening is part of the amount borrowed, which `financed` already covers; refusing the overlap keeps the two from being counted twice.
+- **A fee added to the balance keeps the payment the same, so the loan runs longer; interest accrues on it from its date.** Like interest added by a skipped month. Lenders that re-amortize instead can be matched with a P&I override.
+- **Fees use the same dated-event placement as extra payments.** Monthly loans apply them after the payment due on or before their date; daily loans split the interest period at the date. One rule to learn and test.
+- **A yearly fee can be charged with the payment (default, v0.1.0 behavior) or separately.** Charged separately, it stays on payments 1, 13, 25 even when that month is skipped or reconciled, since it isn't part of the payment.
+- **Schedule totals keep `fees` as yearly fees and add `oneOffFees` and `feesAdded`.** Existing readers of `fees` see the same number; the new totals are additions.

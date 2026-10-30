@@ -367,7 +367,10 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
               <div className="mt-row" style={{ marginTop: 10, color: 'var(--muted)' }}>
                 Total interest <Amt cents={s.totals.interest} whole />
                 {modules.pmi && <> · PMI <Amt cents={s.totals.pmi} whole /></>}
-                {s.totals.fees > 0 && <> · fees <Amt cents={s.totals.fees} whole /></>} · payoff {date(s.rows.at(-1)?.dueDate, 'month')}
+                {s.totals.fees + s.totals.oneOffFees + s.totals.feesAdded > 0 && (
+                  <> · fees <Amt cents={s.totals.fees + s.totals.oneOffFees + s.totals.feesAdded} whole /></>
+                )}{' '}
+                · payoff {date(s.rows.at(-1)?.dueDate, 'month')}
               </div>
             </div>
             {modules.pmi ? (

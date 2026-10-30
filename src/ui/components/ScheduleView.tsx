@@ -18,6 +18,23 @@ interface Props {
 
 type Filter = 'all' | 'upcoming' | 'reconciled';
 
+/** A month's fees: in the payment, charged separately, or added to the balance. */
+function FeeCell({ r, total }: { r: MonthView; total: number }) {
+  if (!total) return <td className="muted">—</td>;
+  const parts = [
+    r.fee && `${money(r.fee)} yearly fee in the payment`,
+    r.separateFee && `${money(r.separateFee)} yearly fee charged separately`,
+    ...r.oneOffFeeList.map((f) => `${money(f.amount)} ${f.label} on ${date(f.date)}, ${f.addedToBalance ? 'added to the balance' : 'paid separately'}`),
+  ].filter(Boolean);
+  const outside = total - r.fee;
+  return (
+    <td title={parts.join('. ')}>
+      <Amt cents={total} />
+      {outside > 0 && ' *'}
+    </td>
+  );
+}
+
 export function StatusPill({ status }: { status: MonthView['status'] }) {
   const label = { paid: 'Paid', flagged: 'Flagged', skipped: 'Skipped', scheduled: 'Scheduled', history: 'Before tracking' }[status];
   return <span className={`mt-pill ${status}`}>{label}</span>;
@@ -25,7 +42,8 @@ export function StatusPill({ status }: { status: MonthView['status'] }) {
 
 /** The full amortization schedule, grouped by year. Click a row to reconcile it. */
 export function ScheduleView({ rows, modules, currentPayment, onOpen, onAddExtra, onRemoveExtra }: Props) {
-  const fees = rows.some((r) => r.fee > 0);
+  const feeOf = (r: MonthView) => r.fee + r.separateFee + r.oneOffFees + r.feesAdded;
+  const fees = rows.some((r) => feeOf(r) > 0);
   // #, due, principal, interest, extra, [pmi], [escrow], [fee], total, balance, status
   const columns = 8 + Number(modules.pmi) + Number(modules.escrow) + Number(fees);
   const [filter, setFilter] = useState<Filter>('all');
@@ -143,7 +161,7 @@ export function ScheduleView({ rows, modules, currentPayment, onOpen, onAddExtra
                         </td>
                         {modules.pmi && <td className={r.pmi ? '' : 'muted'}>{r.pmi ? <Amt cents={r.pmi} /> : '—'}</td>}
                         {modules.escrow && <td><Amt cents={r.escrow} /></td>}
-                        {fees && <td className={r.fee ? '' : 'muted'}>{r.fee ? <Amt cents={r.fee} /> : '—'}</td>}
+                        {fees && <FeeCell r={r} total={feeOf(r)} />}
                         <td
                           style={{ fontWeight: 600 }}
                           title={
@@ -188,6 +206,9 @@ export function ScheduleView({ rows, modules, currentPayment, onOpen, onAddExtra
           </tbody>
         </table>
       </div>
+      {rows.some((r) => r.separateFee + r.oneOffFees + r.feesAdded > 0) && (
+        <p className="mt-kpi-note">* Includes a fee charged separately or added to the balance, which isn't part of that month's payment. Hover for details.</p>
+      )}
     </div>
   );
 }

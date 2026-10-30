@@ -95,15 +95,18 @@ export function settledRows(rows: readonly ScheduleRow[], paid: ReadonlySet<numb
 }
 
 /**
- * Extra payments already made (dated on or before `today`) but applied with
- * a row that isn't settled yet, after the last settled one. The settled
- * balance doesn't include them yet; the real balance does.
+ * Extra payments made and fees added to the balance on or before `today`,
+ * in rows after the last settled one. The settled balance doesn't include
+ * them yet; the real balance does.
  */
-export function extrasNotYetSettled(rows: readonly ScheduleRow[], lastSettled: ScheduleRow | null, today: ISODate): Cents {
+export function notYetSettled(rows: readonly ScheduleRow[], lastSettled: ScheduleRow | null, today: ISODate): { extras: Cents; feesAdded: Cents } {
   const from = lastSettled ? rows.indexOf(lastSettled) + 1 : 0;
-  let total = 0;
-  for (const r of rows.slice(from)) for (const e of r.extraPaymentList) if (e.date <= today) total += e.amount;
-  return total;
+  const out = { extras: 0, feesAdded: 0 };
+  for (const r of rows.slice(from)) {
+    for (const e of r.extraPaymentList) if (e.date <= today) out.extras += e.amount;
+    for (const f of r.oneOffFeeList) if (f.addedToBalance && f.date <= today) out.feesAdded += f.amount;
+  }
+  return out;
 }
 
 /** Reconciled, or made before tracking began. */
@@ -151,7 +154,8 @@ export function summarize(
   const paidRows = rows.filter((r) => isPaid(r, paid));
   const lastPaid = paidRows.at(-1) ?? null;
   const lastSettled = settled.at(-1) ?? null;
-  const balance = (lastSettled ? lastSettled.endingBalance : setup.originalAmount) - extrasNotYetSettled(rows, lastSettled, today);
+  const pending = notYetSettled(rows, lastSettled, today);
+  const balance = (lastSettled ? lastSettled.endingBalance : setup.originalAmount) - pending.extras + pending.feesAdded;
   const deferredBalance = settled.reduce((sum, r) => sum + r.deferred - r.deferredRepaid, 0);
   const pastDue = settled.reduce((sum, r) => sum + r.pastDue - (r.catchUp?.total ?? 0), 0);
   const owed = balance + deferredBalance + pastDue;

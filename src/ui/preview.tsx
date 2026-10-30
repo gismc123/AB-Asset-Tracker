@@ -73,7 +73,10 @@ const CAR: LoanSetup = {
   modules: { pmi: false, escrow: false },
   interestMethod: 'daily',
   downPayment: 600_000,
-  fees: [{ label: 'Processing fee', amount: 29_900, financed: false }],
+  fees: [
+    { label: 'Processing fee', amount: 29_900, financed: false },
+    { label: 'Late charge', amount: 2_500, financed: false, date: '2025-06-14' },
+  ],
 };
 
 const PERSONAL: LoanSetup = {
@@ -87,8 +90,8 @@ const PERSONAL: LoanSetup = {
   paymentDay: 20,
   interestMethod: 'monthly',
   downPayment: null,
-  fees: [],
-  yearlyFee: { basis: 'balance', percent: 0.5 },
+  fees: [{ label: 'Credit insurance', amount: 18_000, financed: false, date: '2025-07-25', addedToBalance: true }],
+  yearlyFee: { basis: 'balance', percent: 0.5, collect: 'separately' },
 };
 
 interface Seed {

@@ -66,7 +66,10 @@ export function owedOn(rows: readonly ScheduleRow[], date: ISODate, originalAmou
     pastDue += r.pastDue - (r.catchUp?.total ?? 0);
     owed = r.endingBalance;
   }
-  for (const r of rows.slice(i)) for (const e of r.extraPaymentList) if (e.date <= date) owed -= e.amount;
+  for (const r of rows.slice(i)) {
+    for (const e of r.extraPaymentList) if (e.date <= date) owed -= e.amount;
+    for (const f of r.oneOffFeeList) if (f.addedToBalance && f.date <= date) owed += f.amount;
+  }
   return Math.max(0, owed) + deferred + pastDue;
 }
 

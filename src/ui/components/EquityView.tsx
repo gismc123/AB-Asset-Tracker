@@ -190,6 +190,7 @@ function EquityParts({ state, kind }: { state: StateView; kind: AssetKind }) {
       value: e.parts.marketChange,
       always: !e.isEstimate,
     },
+    { label: 'Fees added', note: 'One-off fees the lender added to what you owe', value: e.parts.feesAdded ?? 0 },
     { label: 'Skipped payments', note: 'Interest added, or payments deferred or not yet caught up', value: e.parts.skipped },
   ].filter((p, i) => i < 2 || p.value !== 0 || ('always' in p && p.always));
   const max = Math.max(1, ...parts.map((p) => Math.abs(p.value)));
@@ -582,7 +583,8 @@ const ROWS: { key: keyof PeriodTotals; label: string; color?: string }[] = [
   { key: 'interest', label: 'Interest', color: 'var(--s-interest)' },
   { key: 'pmi', label: 'PMI', color: 'var(--s-pmi)' },
   { key: 'escrow', label: 'Escrow', color: 'var(--s-escrow)' },
-  { key: 'fees', label: 'Yearly fees' },
+  { key: 'fees', label: 'Fees' },
+  { key: 'feesAdded', label: 'Fees added to the balance' },
   { key: 'deferredRepaid', label: 'Deferred balance repaid' },
 ];
 

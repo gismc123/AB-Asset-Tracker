@@ -258,18 +258,24 @@ function parseFees(v: unknown): OneOffFee[] {
   if (!Array.isArray(v)) throw new HttpError(400, 'fees must be a list');
   return v.map((f) => {
     const o = f && typeof f === 'object' ? (f as Record<string, unknown>) : {};
-    return {
+    const fee: OneOffFee = {
       label: typeof o.label === 'string' ? o.label.trim() : '',
       amount: typeof o.amount === 'number' ? Math.round(o.amount) : Number.NaN,
       financed: o.financed === true,
     };
+    // Only written when given, so a fee saved before these existed keeps its shape.
+    if (o.date !== undefined && o.date !== null && o.date !== '') fee.date = typeof o.date === 'string' ? o.date : '';
+    if (o.addedToBalance === true) fee.addedToBalance = true;
+    return fee;
   });
 }
 
 function parseYearlyFee(v: unknown): YearlyFee | null {
   if (v === null || v === '') return null;
   const o = v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
-  return { basis: o.basis as YearlyFee['basis'], percent: typeof o.percent === 'number' ? o.percent : Number.NaN };
+  const fee: YearlyFee = { basis: o.basis as YearlyFee['basis'], percent: typeof o.percent === 'number' ? o.percent : Number.NaN };
+  if (o.collect !== undefined && o.collect !== 'payment') fee.collect = o.collect as YearlyFee['collect'];
+  return fee;
 }
 
 function parsePayoffQuote(v: unknown): PayoffQuote | null {

@@ -13,8 +13,10 @@ export interface PeriodTotals {
   interest: Cents;
   pmi: Cents;
   escrow: Cents;
-  /** Yearly fees. */
+  /** Fees paid: yearly (in the payment or separately) and dated one-off fees paid separately. */
   fees: Cents;
+  /** One-off fees added to the balance (owed, not paid yet). */
+  feesAdded: Cents;
   /** Deferred (skipped) payments repaid with the final payment. */
   deferredRepaid: Cents;
   /**
@@ -64,6 +66,7 @@ export function emptyTotals(): PeriodTotals {
     pmi: 0,
     escrow: 0,
     fees: 0,
+    feesAdded: 0,
     deferredRepaid: 0,
     catchUp: 0,
     total: 0,
@@ -75,6 +78,10 @@ export function emptyTotals(): PeriodTotals {
 }
 
 function add(t: PeriodTotals, r: ScheduleRow) {
+  // Charged on their own, so they count even in a skipped month.
+  t.fees += r.separateFee + r.oneOffFees;
+  t.total += r.separateFee + r.oneOffFees;
+  t.feesAdded += r.feesAdded;
   if (r.skipped) {
     t.skipped += 1;
     t.capitalizedInterest += r.capitalizedInterest;

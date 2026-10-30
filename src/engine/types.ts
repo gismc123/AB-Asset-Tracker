@@ -67,22 +67,50 @@ export interface LoanModules {
  */
 export type InterestMethod = 'monthly' | 'daily';
 
-/** A cost paid once when the loan was opened, such as a processing fee or credit insurance. */
+/**
+ * A cost charged once, such as a processing fee, credit insurance or a
+ * late charge. Without a date it was paid when the loan was opened.
+ *
+ * - `financed`: added to the amount borrowed when the loan was opened, so
+ *   it's already in `originalAmount`. Informational.
+ * - `addedToBalance` (needs a date after the open date): added to the
+ *   balance on that date; interest accrues on it and it's paid off with the
+ *   regular payments, so the loan runs a little longer.
+ * - neither: paid separately, up front or on its date. Shown on the
+ *   schedule and in the totals, but never part of the balance or of the
+ *   payment the bank transaction is matched against.
+ */
 export interface OneOffFee {
   label: string;
   amount: Cents;
-  /** True when the fee was added to the amount borrowed instead of paid up front. Informational. */
   financed: boolean;
+  /** When it was charged. Missing or null: when the loan was opened. */
+  date?: ISODate | null;
+  addedToBalance?: boolean;
+}
+
+/** A one-off fee that falls inside the schedule, as applied to a row. */
+export interface DatedFee {
+  label: string;
+  date: ISODate;
+  amount: Cents;
+  addedToBalance: boolean;
 }
 
 /**
  * A fee charged once a year with the first payment of each loan year
  * (payments 1, 13, 25 and so on), as a percent of the original amount or of
- * the balance at that payment. It is part of the payment total.
+ * the balance at that payment.
  */
 export interface YearlyFee {
   basis: 'original' | 'balance';
   percent: number;
+  /**
+   * `payment` (missing = this): part of the payment total, so the bank
+   * transaction includes it. `separately`: charged on its own; on the
+   * schedule and in the totals, but not expected in the payment.
+   */
+  collect?: 'payment' | 'separately';
 }
 
 /** A payoff amount quoted by the lender, used instead of the estimate until it expires. */
@@ -234,7 +262,15 @@ export interface ScheduleRow {
   escrow: Cents;
   /** Yearly fee charged with this payment (see `YearlyFee`). */
   fee: Cents;
-  /** Everything that leaves your account: P&I + extra + offset + PMI + escrow + fee. */
+  /** Yearly fee charged separately at this payment. Not part of `total`. */
+  separateFee: Cents;
+  /** One-off fees dated in this row and paid separately. Not part of `total` or the balance. */
+  oneOffFees: Cents;
+  /** One-off fees dated in this row and added to the balance. */
+  feesAdded: Cents;
+  /** Each dated one-off fee in this row. */
+  oneOffFeeList: DatedFee[];
+  /** The payment the bank transaction should match: P&I + extra + offset + PMI + escrow + fee. */
   total: Cents;
   endingBalance: Cents;
   /** True when the row came from locked, reconciled actual amounts. */
@@ -262,7 +298,8 @@ export interface ScheduleRow {
  */
 export type LockedPayment = Omit<
   ScheduleRow,
-  'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking' | 'extraPayments' | 'extraPaymentList'
+  | 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking'
+  | 'extraPayments' | 'extraPaymentList' | 'separateFee' | 'oneOffFees' | 'feesAdded' | 'oneOffFeeList'
 >;
 
 export interface PmiMilestone {
@@ -307,8 +344,12 @@ export interface Schedule {
     principal: Cents;
     pmi: Cents;
     escrow: Cents;
-    /** Yearly fees on the schedule. One-off fees are in the setup. */
+    /** Yearly fees on the schedule, in the payment or charged separately. */
     fees: Cents;
+    /** Dated one-off fees on the schedule paid separately (undated ones are in the setup). */
+    oneOffFees: Cents;
+    /** Dated one-off fees added to the balance. */
+    feesAdded: Cents;
     payments: number;
     capitalizedInterest: Cents;
     deferred: Cents;

@@ -686,3 +686,33 @@ describe('what-if', () => {
     expect((await request(app).delete(`/asset-tracker-api/loans/1/standing-extra/${id}`).set('x-actual-token', 't')).status).toBe(200);
   });
 });
+
+describe('fees in the setup', () => {
+  it('saves dated fees, fees added to the balance and a yearly fee charged separately, and keeps old shapes', () => {
+    const s = service.saveSetup({
+      ...SAMPLE_SETUP,
+      fees: [
+        { label: 'Origination', amount: 150_000, financed: false },
+        { label: 'Force-placed insurance', amount: 90_000, financed: false, date: '2025-07-10', addedToBalance: true },
+        { label: 'Late charge', amount: 5_000, financed: false, date: '2025-08-20', addedToBalance: false },
+      ],
+      yearlyFee: { basis: 'original', percent: 0.1, collect: 'separately' },
+    });
+    expect(s.setup!.fees).toEqual([
+      { label: 'Origination', amount: 150_000, financed: false },
+      { label: 'Force-placed insurance', amount: 90_000, financed: false, date: '2025-07-10', addedToBalance: true },
+      { label: 'Late charge', amount: 5_000, financed: false, date: '2025-08-20' },
+    ]);
+    expect(s.setup!.yearlyFee).toEqual({ basis: 'original', percent: 0.1, collect: 'separately' });
+    // 0.1% of $320,000 is $320.00 with the first payment of every loan year.
+    expect(s.schedule!.totals).toMatchObject({ feesAdded: 90_000, oneOffFees: 5_000, fees: 32_000 * Math.ceil(s.schedule!.rows.length / 12) });
+    expect(s.schedule!.rows[0]).toMatchObject({ separateFee: 32_000, fee: 0 });
+    expect(s.schedule!.rows[3]!.feesAdded).toBe(90_000);
+    // A yearly fee in the payment is saved without `collect`, as v0.1.0 saved it.
+    expect(service.saveSetup({ ...SAMPLE_SETUP, yearlyFee: { basis: 'balance', percent: 0.25, collect: 'payment' } }).setup!.yearlyFee).toEqual({ basis: 'balance', percent: 0.25 });
+  });
+
+  it('rejects a fee added to the balance without a date', async () => {
+    await expectHttp(() => service.saveSetup({ ...SAMPLE_SETUP, fees: [{ label: 'X', amount: 100, financed: false, addedToBalance: true }] }), 400);
+  });
+});
