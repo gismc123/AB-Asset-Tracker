@@ -16,13 +16,21 @@ is planned, and in what order, is in the [roadmap](ROADMAP.md).
 - **Daily interest uses a 365-day year**, including in leap years. Lenders
   that count 366 days in a leap year, or 360-day years, differ by a few
   cents a month; use a penny offset or follow your statement.
-- **An extra payment made in a skipped month waits for the next payment
-  made.** On a daily-interest loan it then counts from the start of that
-  next interest period, so the schedule charges a few days more interest on
-  it than your lender does.
-- **The payoff estimate is an estimate.** It adds simple daily interest from
-  the last due date (not the date the bank paid) to what you owe. Your
-  lender's payoff quote has the final word; enter it under Setup.
+- **An extra payment made in a month skipped as *missed now, caught up
+  later* or *deferred to payoff* waits for the next payment made.** On a
+  daily-interest loan it then counts from the start of that next interest
+  period, so the schedule charges a few days more interest on it than your
+  lender does. (A month skipped as *interest is added* on a daily-interest
+  loan counts it from its own date.)
+- **Several skipped months in a row on a daily-interest loan:** if the
+  interest that built up is more than the next payment, the rest is added
+  to the balance. Some lenders keep it as unpaid interest instead, paid
+  first by later payments; the balance then differs by the interest on that
+  amount, usually cents.
+- **The payoff estimate is an estimate.** It adds simple daily interest to
+  what you owe, from the day the last payment was made on a daily-interest
+  loan and from the last due date on a monthly one. Your lender's payoff
+  quote has the final word; enter it under Setup.
 - **One yearly fee per loan**, charged with the first payment of each loan
   year, not by calendar year or quarter. A charge your lender adds to the
   rate on the balance and collects inside the monthly payment (for example

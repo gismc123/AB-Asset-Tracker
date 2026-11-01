@@ -184,3 +184,27 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **The tracker's principal balance today is compared, not what's owed with deferred or past-due amounts.** A loan account in Actual normally follows principal, split out of each payment.
 - **A difference is shown with the likeliest reason, never "fixed".** Read-only: the tracker can't and won't change the account.
 - **`PUT /settings` still clears the category when `categoryId` is missing, as in v0.1.0; `balanceAccountId` changes only when it's sent.** The existing route and the existing UI call keep their behavior.
+
+## v0.2.1
+
+### Skipped months on a daily-interest loan
+
+- **On a daily-interest loan, *interest is added to the balance* doesn't add it: the interest keeps building from the last payment made, and the next payment made pays it first.** That is how simple interest works, and how a lender treated a real skipped payment: adding a month's interest to the balance charged interest on interest, and the tracker drifted from the lender by $0.75 over one skipped month. Measured from a real statement, the fixed schedule matches every balance to the cent. Monthly-interest loans are unchanged.
+- **The next payment's interest is one stretch, from the last payment made to this one, rounded once**, like the lender's. The skipped row shows the interest built up so far (`accruedInterest`) without changing the balance, and an extra paid during the skipped month counts from its own date.
+- **When the built-up interest is more than the next payment, the rest is added to the balance** (`capitalizedInterest` on that payment). Keeping it as unpaid interest would need a balance of its own all the way through the summary and equity; it takes four or more skipped months in a row. Recorded in KNOWN_LIMITATIONS.
+- **Rows carry `interestThrough`, the date interest is paid up to: the day the payment was made on a daily-interest loan, the due date on a monthly one, and the last payment made's date on a skipped daily month.** The payoff estimate's per diem runs from it, so it no longer counts days already paid for (it counted from the due date). The v0.1.0 golden test records this as a deliberate correction of one per diem on its daily loan.
+
+### Recalculating reconciled months
+
+- **Locks stay as they are until the user recalculates; nothing changes them silently.** A reconciled month is what the user agreed with their bank; a setup edit or a new version of the math shouldn't move it behind their back.
+- **The state says when locks disagree with today's setup and math (`recalculation`), with the balance before and after, and the UI offers it on Overview, Reconcile and Setup.** The check regenerates the schedule without locks; it adds one schedule generation per state when nothing changed.
+- **What was paid stays the bank's amount. Months are worked out again in order, each from the balance the one before leaves.** When the setup now expects a different payment, the difference goes to principal (extra principal when more, a negative offset when less), as a lender applies whatever arrives; the review shows it per month so an escrow or PMI change can be answered by undoing and matching again instead.
+- **Only interest, principal, total, escrow, PMI and the fee decide whether a lock changed.** A shorter term with the same rate doesn't change what a past payment paid, so it isn't offered.
+- **Nothing is saved while any month can't be recalculated** (a payment that no longer covers the interest, or a month no longer on the schedule). Partial recalculation would leave later months built on a balance the user didn't choose.
+- **No undo; the review points to a backup.** Recalculating back after changing the setup back restores the amounts in practice.
+
+### What if
+
+- **The page leads with one question and one answer.** It shows what is paid now, takes an extra each month (with one-click amounts: round up to an even payment, or a few dollars more, sized to the payment) or a lump sum, and answers in one sentence over a two-column table: monthly payment, payoff month, payments left, interest still to pay.
+- **"Interest still to pay" replaces "interest over the loan"**: it counts from the first payment the extra would go with, so already-paid interest doesn't make the saving look small. `WhatIfPlan` adds `paymentsLeft`, `interestLeft` and `payment`; the result adds `next`. Existing fields are unchanged.
+- **Owed and equity on chosen dates are folded away**, and the dates are plain date inputs. They answer a narrower question than the payoff, and three "Compare on" fields next to the amounts made the page look like a form to fill in.

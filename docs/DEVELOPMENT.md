@@ -78,6 +78,7 @@ cents.
 | `POST /loans/:loanId/months/:n/match` | `{ transactionId }` → paid, or flagged with suggestions |
 | `POST /loans/:loanId/months/:n/resolve` | `{ resolution: rounding\|escrow\|pmi\|extraPrincipal, standing? }` |
 | `POST /loans/:loanId/months/:n/unmatch` | Undo a match and the adjustments it created |
+| `POST /loans/:loanId/recalculate` | Work out every reconciled month again with today's setup and lock the new amounts (409 when a month can't be). What would change is in `GET /state` as `recalculation` |
 | `PUT /loans/:loanId/months/:n/offset` | `{ amount }`, manual penny offset (±100) |
 | `POST /loans/:loanId/months/:n/skip` | `{ mode: catchUp\|capitalize\|defer }` |
 | `POST /loans/:loanId/months/:n/unskip` | Undo a skip |
