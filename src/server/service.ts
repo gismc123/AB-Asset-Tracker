@@ -11,6 +11,7 @@ import {
   isValidISODate,
   periodBreakouts,
   generateSchedule,
+  recalculateLocks,
   homeAssetFor,
   modulesOf,
   ASSET_KINDS,
@@ -52,6 +53,7 @@ import {
   type PeriodBreakouts,
   type PmiInfo,
   type PmiRemovalRule,
+  type RelockChange,
   type Resolution,
   type Schedule,
   type ScheduleRow,
@@ -124,6 +126,11 @@ export interface StateView {
   /** Months imported from the lender's amortization table. Rows using them say `fromBank`. */
   bankSchedule: StoredBankRow[];
   details: LoanDetails;
+  /**
+   * Reconciled months whose locked amounts differ from what today's setup
+   * and math give. Null when they all agree (or nothing is reconciled).
+   */
+  recalculation: Recalculation | null;
   analysis: {
     /** Null when the loan has no asset. */
     equity: EquityAnalysis | null;
@@ -132,6 +139,14 @@ export interface StateView {
     /** Note rate and fees as one yearly rate. An estimate; null when it can't be worked out. */
     effectiveRate: EffectiveRate | null;
   } | null;
+}
+
+export interface Recalculation {
+  changes: RelockChange[];
+  /** Months that can't be recalculated; nothing is saved while there are any. */
+  problems: { payment: number; message: string }[];
+  /** The balance today, as locked and as recalculated. */
+  balance: { before: Cents; after: Cents };
 }
 
 export interface Candidate extends BudgetTransaction {
@@ -455,7 +470,7 @@ export class LoanService {
       bankSchedule: this.store.listBankRows(),
       details: this.store.getDetails(),
     };
-    if (!setup) return { ...base, balanceCheck: null, schedule: null, summary: null, analysis: null };
+    if (!setup) return { ...base, balanceCheck: null, schedule: null, summary: null, recalculation: null, analysis: null };
 
     const schedule = this.build(setup);
     const months = new Map(this.store.listMonths().map((m) => [m.payment, m]));
@@ -493,6 +508,7 @@ export class LoanService {
         currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null,
       },
       summary,
+      recalculation: this.recalculation(setup, summary.balance, paid, today, asset),
       balanceCheck: balanceAccount ? checkBalance(summary.balance, this.linked.get(balanceAccount)) : null,
       analysis: {
         equity: asset ? analyzeEquity(setup, schedule, paid, today, asset) : null,
@@ -504,6 +520,36 @@ export class LoanService {
         effectiveRate: effectiveRate(setup),
       },
     };
+  }
+
+  private relock(setup: LoanSetup) {
+    const paid = this.store.listMonths().filter((m) => m.status === 'paid').map((m) => ({ payment: m.payment, amount: m.transactionAmount }));
+    return recalculateLocks(setup, this.options(), paid);
+  }
+
+  private recalculation(setup: LoanSetup, balance: Cents, paid: ReadonlySet<number>, today: ISODate, asset: Asset | null): Recalculation | null {
+    if (paid.size === 0) return null;
+    const r = this.relock(setup);
+    if (!r.changes.length && !r.problems.length) return null;
+    const after = summarize(setup, r.schedule, paid, today, asset).balance;
+    return { changes: r.changes, problems: r.problems, balance: { before: balance, after } };
+  }
+
+  /**
+   * Work out every reconciled month again with today's setup and math, and
+   * lock the new amounts. What was paid stays what the bank says.
+   */
+  recalculate() {
+    const setup = this.requireSetup();
+    this.root.transaction(() => {
+      const r = this.relock(setup);
+      if (r.problems.length) throw new HttpError(409, r.problems[0]!.message, { problems: r.problems.map((p) => p.message) });
+      for (const { payment } of r.changes) {
+        const month = this.store.getMonth(payment)!;
+        this.store.saveMonth({ ...month, locked: r.locks.get(payment)! });
+      }
+    });
+    return this.state();
   }
 
   /** Read-only snapshot for dashboards. Null when the loan is not set up. */

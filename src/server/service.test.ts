@@ -787,3 +787,43 @@ describe("the lender's amortization table", () => {
     expect((await request(app).delete(at).set('x-actual-token', 't')).body.bankSchedule).toEqual([]);
   });
 });
+
+describe('recalculating reconciled months', () => {
+  async function payFirst(n: number) {
+    for (let k = 1; k <= n; k++) {
+      source.add(`r${k}`, row(k).dueDate, -row(k).total);
+      await service.match(k, { transactionId: `r${k}` });
+    }
+  }
+
+  it('offers nothing while the locks agree with the setup', async () => {
+    await payFirst(2);
+    expect(service.state().recalculation).toBeNull();
+  });
+
+  it('offers it after a setup change, then locks the new amounts from what was paid', async () => {
+    await payFirst(2);
+    const paid = [row(1).total, row(2).total];
+    service.saveSetup({ ...SAMPLE_SETUP, annualRatePercent: SAMPLE_SETUP.annualRatePercent - 1, piPaymentOverride: service.state().schedule!.piPayment });
+    const offer = service.state().recalculation!;
+    expect(offer.changes.map((c) => c.payment)).toEqual([1, 2]);
+    expect(offer.problems).toEqual([]);
+    expect(offer.balance.after).toBeLessThan(offer.balance.before);
+
+    const s = service.recalculate();
+    expect(s.recalculation).toBeNull();
+    expect(s.summary!.balance).toBe(offer.balance.after);
+    expect([row(1).total, row(2).total]).toEqual(paid);
+    expect(row(1).interest).toBe(offer.changes[0]!.after.interest);
+    expect(row(2).locked).toBe(true);
+  });
+
+  it('survives a reopen, and keeps each match', async () => {
+    await payFirst(1);
+    service.saveSetup({ ...SAMPLE_SETUP, annualRatePercent: 5, piPaymentOverride: service.state().schedule!.piPayment });
+    service.recalculate();
+    const month = store.loan(service.state().loan.id).getMonth(1)!;
+    expect(month).toMatchObject({ status: 'paid', transactionId: 'r1' });
+    expect(row(1).interest).toBe(month.locked!.interest);
+  });
+});

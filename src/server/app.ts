@@ -167,6 +167,9 @@ export function createApp(deps: AppDeps) {
   loan.post('/months/:payment/unmatch', (req, res) => {
     res.json(one(req).unmatch(paymentParam(req)));
   });
+  loan.post('/recalculate', (req, res) => {
+    res.json(one(req).recalculate());
+  });
   loan.put('/months/:payment/offset', (req, res) => {
     res.json(one(req).setOffset(paymentParam(req), req.body));
   });

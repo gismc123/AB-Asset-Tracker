@@ -16,6 +16,7 @@ import {
   escrowReport,
   generateSchedule,
   lockRow,
+  recalculateLocks,
   periodBreakouts,
   resolutionToAdjustment,
   standingExtraAt,
@@ -308,6 +309,18 @@ class MockLoan {
     return this.asset ? withAccountValue(this.asset, reading(this.asset.actualAccountId)).asset : null;
   }
 
+  relock() {
+    const paid = [...this.months].filter(([, m]) => m.status === 'paid').map(([payment, m]) => ({ payment, amount: -m.txn.amount }));
+    return recalculateLocks(this.setup!, this.options(), paid);
+  }
+
+  recalculation(balance: number, paid: Set<number>, asset: Parameters<typeof summarize>[4]): StateView['recalculation'] {
+    if (!paid.size) return null;
+    const r = this.relock();
+    if (!r.changes.length && !r.problems.length) return null;
+    return { changes: r.changes, problems: r.problems, balance: { before: balance, after: summarize(this.setup!, r.schedule, paid, TODAY, asset).balance } };
+  }
+
   state(): StateView {
     const linked = this.asset ? withAccountValue(this.asset, reading(this.asset.actualAccountId)) : null;
     const base = {
@@ -316,7 +329,7 @@ class MockLoan {
       source: { connected: true, lastSync: null, error: null }, today: TODAY, details: this.details, extraPayments: this.extras, bankSchedule: this.bank,
       adjustments: this.adjustments.map((a, i) => ({ id: i + 1, adjustment: a.adj, sourcePayment: a.source, createdAt: '' })),
     };
-    if (!this.setup) return { ...base, balanceCheck: null, schedule: null, summary: null, analysis: null };
+    if (!this.setup) return { ...base, balanceCheck: null, schedule: null, summary: null, recalculation: null, analysis: null };
     const s = this.build();
     const rows: MonthView[] = s.rows.map((r) => {
       const m = this.months.get(r.payment);
@@ -339,6 +352,7 @@ class MockLoan {
       schedule: { piPayment: s.piPayment, calculatedPiPayment: s.calculatedPiPayment, totals: s.totals, pmi: s.pmi, rows,
         currentPayment: rows.find((r) => r.status === 'scheduled' || r.status === 'flagged')?.payment ?? null },
       summary,
+      recalculation: this.recalculation(summary.balance, paid, asset),
       analysis: {
         equity: asset ? analyzeEquity(this.setup, s, paid, TODAY, asset) : null,
         periods: { paid: periodBreakouts(s.rows, paidOn, TODAY, 'paid'), scheduled: periodBreakouts(s.rows, paidOn, TODAY, 'scheduled') },
@@ -412,6 +426,12 @@ class MockLoan {
           self.adjustments.push({ adj, source: n });
         } catch (e) { throw new ApiError(400, (e as Error).message); }
         self.months.set(n, { ...m, status: 'paid', resolution, locked: lockRow(self.build().rows[n - 1]!) });
+        return state();
+      },
+      async recalculate() {
+        const r = self.relock();
+        if (r.problems.length) throw new ApiError(409, r.problems[0]!.message);
+        for (const { payment } of r.changes) self.months.set(payment, { ...self.months.get(payment)!, locked: r.locks.get(payment)! });
         return state();
       },
       async unmatch(n) {

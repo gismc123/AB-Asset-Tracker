@@ -74,6 +74,8 @@ export interface LoanClient {
   match(payment: number, transactionId: string, categoryId: string): Promise<MatchResult>;
   resolve(payment: number, resolution: Resolution, standing: boolean): Promise<StateView>;
   unmatch(payment: number): Promise<StateView>;
+  /** Work out reconciled months again with today's setup and lock the new amounts. */
+  recalculate(): Promise<StateView>;
   setOffset(payment: number, amount: number): Promise<StateView>;
   skip(payment: number, mode: SkipMode): Promise<StateView>;
   unskip(payment: number): Promise<StateView>;
@@ -171,6 +173,7 @@ export function createClient(base = '/asset-tracker-api', getToken: () => Promis
       match: (n, transactionId, categoryId) => call('POST', `${at}/months/${n}/match`, { transactionId, categoryId }),
       resolve: (n, resolution, standing) => call('POST', `${at}/months/${n}/resolve`, { resolution, standing }),
       unmatch: (n) => call('POST', `${at}/months/${n}/unmatch`),
+      recalculate: () => call('POST', `${at}/recalculate`),
       setOffset: (n, amount) => call('PUT', `${at}/months/${n}/offset`, { amount }),
       skip: (n, mode) => call('POST', `${at}/months/${n}/skip`, { mode }),
       unskip: (n) => call('POST', `${at}/months/${n}/unskip`),
