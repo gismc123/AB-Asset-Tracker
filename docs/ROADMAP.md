@@ -7,6 +7,9 @@ says which ones will be closed and how.
 
 v0.2.0 shipped the what-if calculator and extra payments on their own
 date, among others; see [RELEASE_NOTES_v0.2.0.md](../RELEASE_NOTES_v0.2.0.md).
+v0.2.1 fixed skipped months on daily-interest loans and added
+recalculating reconciled months; see
+[RELEASE_NOTES_v0.2.1.md](../RELEASE_NOTES_v0.2.1.md).
 
 Nothing here has a date. Order can change with feedback, and contributions
 are welcome on any item: open an issue first for the larger ones (see
