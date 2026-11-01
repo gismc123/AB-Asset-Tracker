@@ -188,7 +188,28 @@ describe('upgrading a v0.1.0 database', () => {
     return source;
   }
 
+  /**
+   * Deliberate corrections since v0.1.0, each one a known amount:
+   * - v0.2.1: a daily-interest loan's payoff estimate counts interest from the
+   *   day the last payment was made, not its due date. The Hatchback's
+   *   payment 5 was due Aug 10 and made Aug 11: one day (one per diem) less.
+   */
+  function corrected() {
+    type Payoff = { payoff: { amount: number; perDiem: number } };
+    const v = structuredClone(v010);
+    const states = v.states as unknown as Record<string, { summary: Payoff }>;
+    const summaries = v.summaries as Record<string, Payoff>;
+    const endpoints = v.endpoint as { id: number; payoff: { amount: number } }[];
+    const perDiem = states['2']!.summary.payoff.perDiem;
+    states['2']!.summary.payoff.amount -= perDiem;
+    summaries['2']!.payoff.amount -= perDiem;
+    const endpoint = endpoints.find((e) => e.id === 2)!.payoff;
+    endpoint.amount = Math.round(endpoint.amount * 100 - perDiem) / 100;
+    return v;
+  }
+
   it('reproduces every loan, match, total and summary to the cent', () => {
+    const v010 = corrected();
     const file = v010File();
     const store = new Store(file);
     const service = new TrackerService(store, v010Source(), () => v010.today);

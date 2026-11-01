@@ -259,10 +259,52 @@ describe('daily interest', () => {
     expect(s.rows.length).toBeLessThan(60);
   });
 
-  it('runs longer after interest is added by a skipped month', () => {
+  it('runs longer after a skipped month', () => {
     const s = generateSchedule(loan, { adjustments: [{ kind: 'skip', payment: 4, mode: 'capitalize' }] });
     expect(s.rows).toHaveLength(61);
     expect(s.rows.at(-1)!.endingBalance).toBe(0);
+  });
+
+  it('lets interest build through a skipped month instead of adding it to the balance (hand-checked)', () => {
+    const s = generateSchedule(loan, {
+      adjustments: [{ kind: 'skip', payment: 2, mode: 'capitalize' }],
+      paidDates: new Map([[1, '2025-02-15'], [3, '2025-04-16']]),
+    });
+    const [first, skipped, next] = s.rows;
+    // Nothing paid and nothing added: Feb 15 to Mar 15's 28 days of interest wait for the next payment.
+    expect(skipped).toMatchObject({ skipped: 'capitalize', total: 0, interest: 0, capitalizedInterest: 0, interestThrough: '2025-02-15' });
+    expect(skipped!.endingBalance).toBe(first!.endingBalance);
+    expect(skipped!.accruedInterest).toBe(Math.round(first!.endingBalance * 0.0002 * 28));
+    // The next payment pays Feb 15 to Apr 16 in one stretch, 60 days, with no interest on interest.
+    expect(next!.interest).toBe(Math.round(first!.endingBalance * 0.0002 * 60));
+    expect(next!.endingBalance).toBe(first!.endingBalance - (next!.total - next!.interest));
+    expect(next!.interestThrough).toBe('2025-04-16');
+    expect(s.totals.capitalizedInterest).toBe(0);
+  });
+
+  it('adds to the balance only the built-up interest a payment after several skips cannot cover', () => {
+    const skips = [2, 3, 4, 5].map((payment) => ({ kind: 'skip' as const, payment, mode: 'capitalize' as const }));
+    const s = generateSchedule(loan, { adjustments: skips });
+    const row = s.rows[5]!;
+    // Feb 15 to Jul 15 is 150 days: more interest than one payment.
+    const built = Math.round(s.rows[0]!.endingBalance * 0.0002 * 150);
+    expect(built).toBeGreaterThan(s.piPayment);
+    expect(row).toMatchObject({ interest: s.piPayment, scheduledPrincipal: 0, capitalizedInterest: built - s.piPayment });
+    expect(row.endingBalance).toBe(row.beginningBalance + built - s.piPayment);
+    // The payment after it is back to normal, from Jul 15.
+    expect(s.rows[6]!.interest).toBe(Math.round(row.endingBalance * 0.0002 * 31));
+    expect(s.rows.at(-1)!.endingBalance).toBe(0);
+  });
+
+  it('counts the payoff per diem from the day the last payment was made, through skipped months', () => {
+    const paidDates = new Map([[1, '2025-02-17']]);
+    const s = generateSchedule(loan, { paidDates });
+    // Due Feb 15, made Feb 17: Feb 17 to Feb 27 is 10 days.
+    const balance = s.rows[0]!.endingBalance;
+    expect(summarize(loan, s, new Set([1]), '2025-02-27', null).payoff!.amount).toBe(balance + Math.round(balance * 0.0002 * 10));
+    const skipped = generateSchedule(loan, { paidDates, adjustments: [{ kind: 'skip', payment: 2, mode: 'capitalize' }] });
+    // March was skipped: Feb 17 to Mar 27 is 38 days.
+    expect(summarize(loan, skipped, new Set([1]), '2025-03-27', null).payoff!.amount).toBe(balance + Math.round(balance * 0.0002 * 38));
   });
 
   it('leaves monthly loans alone', () => {

@@ -176,7 +176,7 @@ function skipAt(adjustments: readonly Adjustment[], k: number): SkipMode | null 
 }
 
 /** Fields a row has when nothing was skipped. */
-const NOT_SKIPPED = { skipped: null, capitalizedInterest: 0, deferred: 0, deferredRepaid: 0, pastDue: 0, catchUp: null } as const;
+const NOT_SKIPPED = { skipped: null, capitalizedInterest: 0, accruedInterest: 0, deferred: 0, deferredRepaid: 0, pastDue: 0, catchUp: null } as const;
 
 /**
  * Something that changes the balance on a date, between payments: extra
@@ -391,6 +391,8 @@ function amortize(
   // Daily interest runs from the previous payment's date (the open date for the first).
   let lastDate = setup.openDate;
   let capitalizedSkips = 0;
+  // Daily loan: a skipped month left interest building that no payment has paid yet.
+  let interestBuilding = false;
   const escrowAt = (k: number) => (escrowOn ? valueFrom(adjustments, 'escrow', k, setup.escrowMonthly).amount : 0);
   // Extra payments and dated fees, in date order (fees first on the same
   // day). Those dated on or before the last payment made before tracking
@@ -439,6 +441,7 @@ function amortize(
         ...fields,
         payment: k,
         dueDate,
+        interestThrough: daily ? periodEnd : dueDate,
         beginningBalance: balance,
         principal: regular + fields.extraPayments,
         endingBalance: applied.balance,
@@ -447,6 +450,7 @@ function amortize(
         fromBank: false,
       });
       balance = applied.balance;
+      interestBuilding = false;
       continue;
     }
 
@@ -476,6 +480,7 @@ function amortize(
     const empty = {
       payment: k,
       dueDate,
+      interestThrough: daily ? periodEnd : dueDate,
       beginningBalance: balance,
       extraPrincipal: 0,
       pennyOffset: 0,
@@ -488,6 +493,29 @@ function amortize(
       beforeTracking: false,
       fromBank: false,
     };
+
+    if (skip === 'capitalize' && daily) {
+      // Simple interest is never charged on interest. The month's interest
+      // keeps building from the last payment made, and the next payment
+      // made pays it first; the balance stays where it is.
+      lastDate = periodStart;
+      rows.push({
+        ...empty,
+        ...NOT_SKIPPED,
+        ...NO_EVENTS,
+        interestThrough: periodStart,
+        interest: 0,
+        scheduledPrincipal: 0,
+        principal: 0,
+        principalAndInterest: 0,
+        endingBalance: balance,
+        skipped: 'capitalize',
+        accruedInterest: interest,
+      });
+      capitalizedSkips++;
+      interestBuilding = true;
+      continue;
+    }
 
     if (skip === 'capitalize') {
       rows.push({
@@ -507,8 +535,16 @@ function amortize(
       continue;
     }
 
+    // Rarely, interest built up over skipped months is more than this payment.
+    // The rest is added to the balance (a lender may keep it as unpaid interest).
+    let addedInterest = 0;
+    if (!bank && interestBuilding && interest > pi) {
+      addedInterest = interest - pi;
+      interest = pi;
+      available += addedInterest;
+    }
     let scheduledPrincipal = bank ? bank.principal : pi - interest;
-    if (!bank && scheduledPrincipal <= 0) {
+    if (!bank && scheduledPrincipal <= 0 && !interestBuilding) {
       throw new SetupError([
         `Payment ${k}: the P&I payment does not cover the month's interest, so the loan would never pay off`,
       ]);
@@ -548,6 +584,7 @@ function amortize(
       });
       balance -= scheduledPrincipal;
       if (!catchUp) deferredBalance += missedPi;
+      interestBuilding = false;
       continue;
     }
 
@@ -579,6 +616,7 @@ function amortize(
     rows.push({
       payment: k,
       dueDate,
+      interestThrough: empty.interestThrough,
       beginningBalance: balance,
       interest,
       scheduledPrincipal,
@@ -597,8 +635,10 @@ function amortize(
       beforeTracking,
       fromBank: !!bank,
       ...NOT_SKIPPED,
+      capitalizedInterest: addedInterest,
     });
     balance = applied.balance;
+    interestBuilding = false;
   }
   // Deferred payments come due in one lump sum with the final payment.
   const last = rows.at(-1);

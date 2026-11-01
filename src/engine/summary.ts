@@ -203,8 +203,9 @@ export function summarize(
   const nextRow = next ?? rows.at(-1);
   const active = modulesOf(setup).pmi && p.hasPmi && nextRow !== undefined && (p.dropPayment === null || nextRow.payment < p.dropPayment);
   const current = asset ? currentValue(asset) : null;
-  // The settled date a per diem runs from: the bank date for a reconciled payment.
-  const lastSettledDate = lastSettled ? lastSettled.dueDate : null;
+  // The date a per diem runs from: on a daily-interest loan, the day the last
+  // payment was really made (skipped months don't move it).
+  const lastSettledDate = lastSettled ? lastSettled.interestThrough : null;
 
   return {
     asOf: today,

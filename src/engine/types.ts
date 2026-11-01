@@ -174,7 +174,9 @@ export interface LoanSetup {
  *   added, and the loan's length doesn't change.
  * - `capitalize`: nothing is paid; the month's interest is added to the
  *   balance and the same monthly payment continues, so the loan runs longer.
- *   Typical of "skip-a-payment" programs.
+ *   Typical of "skip-a-payment" programs. On a daily-interest (simple
+ *   interest) loan the interest is not added to the balance: it keeps
+ *   building from the last payment made, and the next payment pays it first.
  * - `defer`: nothing is paid; the missed principal and interest move to a
  *   separate, interest-free balance due in one lump sum when the loan is paid
  *   off. Typical of payment deferral after forbearance.
@@ -234,6 +236,13 @@ export interface ExtraPayment {
 export interface ScheduleRow {
   payment: number;
   dueDate: ISODate;
+  /**
+   * Interest is paid up to this date once the row is settled: the day the
+   * payment was made on a daily-interest loan (the due date until then), the
+   * due date on a monthly one. A skipped month on a daily loan keeps the
+   * date of the last payment made.
+   */
+  interestThrough: ISODate;
   beginningBalance: Cents;
   interest: Cents;
   /** Principal portion of the required P&I payment. */
@@ -281,8 +290,17 @@ export interface ScheduleRow {
   beforeTracking: boolean;
   /** Set when this payment is skipped. A skipped row has `total` 0. */
   skipped: SkipMode | null;
-  /** Interest added to the balance by a `capitalize` skip (not paid that month). */
+  /**
+   * Interest added to the balance: by a `capitalize` skip on a monthly-interest
+   * loan, or, rarely, on a daily-interest loan when the payment after skipped
+   * months doesn't cover all the interest that built up.
+   */
   capitalizedInterest: Cents;
+  /**
+   * On a daily-interest loan's `capitalize` skip: interest built up since the
+   * last payment made, not added to the balance. The next payment pays it.
+   */
+  accruedInterest: Cents;
   /** Principal and interest moved to the deferred balance by a `defer` skip. */
   deferred: Cents;
   /** On the final payment: the deferred balance repaid as a lump sum (included in `total`). */
@@ -300,7 +318,7 @@ export interface ScheduleRow {
  */
 export type LockedPayment = Omit<
   ScheduleRow,
-  | 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'beforeTracking' | 'fromBank'
+  | 'beginningBalance' | 'endingBalance' | 'locked' | 'dueDate' | 'interestThrough' | 'beforeTracking' | 'fromBank'
   | 'extraPayments' | 'extraPaymentList' | 'separateFee' | 'oneOffFees' | 'feesAdded' | 'oneOffFeeList'
 >;
 
