@@ -11,3 +11,4 @@ export * from './assets.js';
 export * from './whatif.js';
 export * from './effective-rate.js';
 export * from './bank-table.js';
+export * from './relock.js';

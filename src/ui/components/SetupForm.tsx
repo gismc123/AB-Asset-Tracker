@@ -298,7 +298,8 @@ export function SetupForm({ type, initial, hasReconciled, onSave, header, header
       )}
       {initial && hasReconciled && (
         <div className="mt-note warn" style={{ marginBottom: 14 }}>
-          Months you've already reconciled keep their locked amounts. Changes apply to the rest of the schedule.
+          Months you've already reconciled keep their locked amounts, and changes apply to the rest of the schedule. If a change would
+          work those months out differently, you'll be offered to recalculate them once you save.
         </div>
       )}
 

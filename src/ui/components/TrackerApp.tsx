@@ -6,6 +6,7 @@ import { valueScreenLabel } from '../loanTypes.js';
 import { AddLoanWizard } from './AddLoanWizard.js';
 import { Amt } from './Amt.js';
 import { BalanceCheckNote, BalanceCheckSettings } from './BalanceCheckView.js';
+import { RecalculateNotice } from './RecalculateNotice.js';
 import { BackupView } from './BackupView.js';
 import { BankTableView } from './BankTableView.js';
 import { BalanceChart } from './BalanceChart.js';
@@ -331,6 +332,8 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
           Can't read from Actual right now: {state.source.error}
         </div>
       )}
+
+      {(shown === 'setup' || shown === 'overview' || shown === 'reconcile') && <RecalculateNotice state={state} client={client} onState={setState} />}
 
       {shown === 'setup' && (
         <>

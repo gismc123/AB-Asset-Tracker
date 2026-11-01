@@ -21,6 +21,12 @@ export interface WhatIfPlan {
   payments: number;
   /** Interest over the whole loan, paid and still to pay. */
   interest: Cents;
+  /** Payments still to make, from `fromPayment` on (skipped months left out). */
+  paymentsLeft: number;
+  /** Interest still to pay, from `fromPayment` on. */
+  interestLeft: Cents;
+  /** The payment at `fromPayment`: what leaves the bank each month from then on. Null when it's past the payoff. */
+  payment: Cents | null;
 }
 
 export interface WhatIfPoint {
@@ -33,6 +39,8 @@ export interface WhatIfPoint {
 
 export interface WhatIfResult {
   input: WhatIfInput;
+  /** The first payment the extra would go with. */
+  next: { payment: number; dueDate: ISODate; extraPrincipal: Cents } | null;
   current: WhatIfPlan;
   scenario: WhatIfPlan;
   /** Calendar months between the two payoff dates. */
@@ -43,7 +51,17 @@ export interface WhatIfResult {
   balances: { dueDate: ISODate; current: Cents | null; scenario: Cents | null }[];
 }
 
-const plan = (s: Schedule): WhatIfPlan => ({ payoffDate: s.rows.at(-1)?.dueDate ?? null, payments: s.rows.length, interest: s.totals.interest });
+function plan(s: Schedule, fromPayment: number): WhatIfPlan {
+  const ahead = s.rows.slice(fromPayment - 1);
+  return {
+    payoffDate: s.rows.at(-1)?.dueDate ?? null,
+    payments: s.rows.length,
+    interest: s.totals.interest,
+    paymentsLeft: ahead.filter((r) => !r.skipped).length,
+    interestLeft: ahead.reduce((sum, r) => sum + (r.skipped ? 0 : r.interest) + (r.catchUp?.interest ?? 0), 0),
+    payment: ahead[0]?.total ?? null,
+  };
+}
 
 const monthIndex = (date: ISODate) => {
   const { y, m } = parseISODate(date);
@@ -85,8 +103,8 @@ export function whatIf(setup: LoanSetup, options: GenerateOptions, input: WhatIf
     hypotheticalExtra: input.monthlyExtra > 0 ? { fromPayment: input.fromPayment, amount: input.monthlyExtra } : undefined,
     extraPayments: [...(options.extraPayments ?? []), ...(input.lumpSum && input.lumpSum.amount > 0 ? [{ id: null, ...input.lumpSum }] : [])],
   });
-  const a = plan(current);
-  const b = plan(scenario);
+  const a = plan(current, input.fromPayment);
+  const b = plan(scenario, input.fromPayment);
   const valueOn = (date: ISODate) =>
     asset ? (hasProjection(asset) ? projectedValue(asset, date, setup.openDate) : currentValue(asset).value) : null;
 
@@ -106,8 +124,10 @@ export function whatIf(setup: LoanSetup, options: GenerateOptions, input: WhatIf
   for (const r of current.rows) byDate.set(r.dueDate, { current: r.endingBalance, scenario: null });
   for (const r of scenario.rows) byDate.set(r.dueDate, { current: byDate.get(r.dueDate)?.current ?? null, scenario: r.endingBalance });
 
+  const nextRow = current.rows[input.fromPayment - 1];
   return {
     input,
+    next: nextRow ? { payment: nextRow.payment, dueDate: nextRow.dueDate, extraPrincipal: nextRow.extraPrincipal } : null,
     current: a,
     scenario: b,
     monthsSaved: a.payoffDate && b.payoffDate ? monthIndex(a.payoffDate) - monthIndex(b.payoffDate) : 0,

@@ -397,7 +397,7 @@ Each loan has these screens:
 | **Escrow** | Mortgages with escrow only. Escrow from each payment, the tax and insurance bills paid from it, a running balance, totals by year, and whether a year of collections covers a year of bills. |
 | **Reconcile** | One month at a time. Pick the loan's category, click the matching transaction, and the month is marked paid. If the amount is off, you're asked why. Add any number of [extra payments](#extra-payments) made on their own, or mark a month as skipped. |
 | **Schedule** | Every payment: due date, principal, interest, extra principal, PMI, escrow and fees where the loan has them, total, balance, and status (*scheduled*, *flagged*, *paid*, *skipped*, or *before tracking*). Extra payments show under their month, and months from [your lender's table](#importing-your-lenders-amortization-table) have a *bank table* badge. Click any row to reconcile it. |
-| **What if** | Try a higher monthly payment or a one-time lump sum without saving anything: the new payoff date next to the current one, months saved, what you'd owe and your equity on chosen dates. See [What if](#what-if). |
+| **What if** | Try a higher monthly payment or a one-time lump sum without saving anything: the payoff date, months sooner and interest saved, next to the loan as it stands. See [What if](#what-if). |
 | **Details** | Reference details that fit the loan type: servicer, account number, lender, insurance, and for a mortgage the property, tax parcel and PMI certificate, or for a vehicle the VIN and plate. Plus notes and fields of your own. |
 | **Setup** | The loan terms you enter once, with a live preview, plus rename, archive and delete. |
 
@@ -480,7 +480,9 @@ Under the hood:
 
 - **The schedule generates itself** from the setup and rolls forward month
   by month. Reconciled months are *locked*: their real amounts are frozen,
-  and later months recalculate from them.
+  and later months recalculate from them. If you change the setup later, or
+  a new version works interest out more exactly, you're offered to
+  [recalculate them](#recalculating-reconciled-months).
 - **Money is exact.** Everything is stored in whole cents (Actual's own
   unit), so the schedule matches your statement to the penny.
 - **Read-only toward Actual.** The tracker reads categories, transactions
@@ -687,21 +689,46 @@ Extra principal sent **inside** the regular payment is still answered as
 ### What if
 
 The **What if** screen answers "when would I be done if I paid more?"
-without changing anything. Enter an **extra each month**, a **one-time
-payment** with its date, or both. Side by side you see the payoff date as it
-stands and with what you tried, how much sooner that is, and what you'd owe
-and your equity on three dates you can change (1, 5 and 10 years from today
-to start). Interest over the loan is there too, in smaller print, and a
-chart shows both balances.
+without changing anything. It starts with what you pay now, and as it
+stands, when the loan is paid off and how much interest is still to pay.
+
+- **Pay more every month**: type an amount or click one: *Round up to* an
+  even payment, or a few dollars more. It shows what you'd pay each month.
+- **Or pay a lump sum once** (optional): an amount and the day you'd pay it.
+
+The answer is one line, such as *Paid off in Nov 2029, 3 months sooner, and
+you'd pay $207 less interest*, over a table of the monthly payment, payoff
+month, payments left and interest still to pay, as it stands and with the
+extra. A chart shows both balances. What you'd owe (and your equity) on
+particular dates is folded away under the chart.
 
 It starts from the loan as it really stands, with every payment, extra and
-skip you've recorded. Nothing is saved unless you click **Make $X a month
-my standing extra**: from the next unpaid payment on, the schedule then
-expects that much more with each payment. Standing extras set this way are
-listed on the same screen with a **Remove** button. A one-time payment is
-never saved; when you really make it, add it as an [extra payment](#extra-payments).
+skip you've recorded. Nothing is saved unless you click **Keep it: add $X a
+month to my schedule**: from the next unpaid payment on, the schedule then
+expects that much more with each payment. Extras added this way are listed
+on the same screen with a **Remove** button. A lump sum is never saved;
+when you really make it, add it as an [extra payment](#extra-payments).
 
-![What if for a sample mortgage: $200 more a month and $5,000 once in March 2026 move the payoff from December 2054 to about seven years sooner, with what you'd owe and equity on three dates, interest totals, and a chart of both balances](docs/screenshots/what-if.png)
+![What if for a sample mortgage: $200 more a month and $5,000 once in March 2026. The answer reads paid off in Oct 2047, 7 years, 2 months sooner, and $116,045 less interest, over a table of monthly payment, payoff month, payments left and interest still to pay, as it stands and with the extra](docs/screenshots/what-if.png)
+
+### Recalculating reconciled months
+
+A reconciled month keeps the amounts it was locked with, so changing the
+setup later (the rate, a fee, the term) only changes months still to come.
+When the current setup would split reconciled months differently, the
+Overview, Reconcile and Setup screens say so, with what your balance would
+be after recalculating. **Review** lists each month's interest, principal
+and balance now and recalculated; **Recalculate** locks the new amounts.
+
+- What you paid stays what your bank shows. Only how each payment splits
+  between interest and principal is worked out again, in order, each month
+  from the balance the one before leaves.
+- If the setup now expects a different payment than you made, the
+  difference goes to principal, as your lender would apply it, and the
+  review says so for each month. If it was really escrow or PMI, undo that
+  month's match instead and match it again to answer what it was.
+- There's no undo button. Make a [backup](#backing-up-and-restoring) first if you
+  might want to go back.
 
 ### Importing your lender's amortization table
 
@@ -742,7 +769,7 @@ handles it:
 | Choice | What the schedule does |
 |---|---|
 | **Missed now, caught up later** | You miss payments for a while and pay them back later. Nothing is forgiven. The whole missed payment (including PMI and escrow on a mortgage) becomes *past due*. No interest is added and the loan's length doesn't change. |
-| **Interest is added to the balance** | Nothing is paid that month. The month's interest is added to what you owe, the same monthly payment continues, and the loan runs a little longer. Typical of skip-a-payment offers. |
+| **Interest is added to the balance** | Nothing is paid that month. The month's interest is added to what you owe, the same monthly payment continues, and the loan runs a little longer. Typical of skip-a-payment offers. On a daily-interest (simple interest) loan, such as most car loans, the interest isn't added to what you owe: it keeps building from your last payment, and your next payment pays it first, as simple-interest lenders do. |
 | **Payment is deferred to payoff** | Nothing is paid that month. The missed principal and interest go into a separate, interest-free balance due in one lump sum at payoff (or when the asset is sold). Typical after forbearance. |
 
 **Catching up.** For a *missed now, caught up later* month, set a
@@ -803,8 +830,9 @@ always includes the payments still to come.
 
 **Payoff today** (on loans without PMI, and in the summary) is your lender's
 payoff quote while it's good, or else an estimate: what you owe plus simple
-interest per day since the last payment. Ask your lender for an exact quote
-before paying a loan off.
+interest per day since the last payment (since the day it was made, on a
+daily-interest loan). Ask your lender for an exact quote before paying a
+loan off.
 
 **Escrow** (mortgages). Escrow from each reconciled payment is added
 automatically. The bills it pays never pass through your bank, so record
