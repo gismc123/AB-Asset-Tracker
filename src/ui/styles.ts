@@ -231,6 +231,9 @@ textarea.mt-input { min-height: 90px; resize: vertical; font: inherit; }
 .mt-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .mt-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 2px 1px 8px; border-radius: 999px; background: var(--header); color: var(--text); border: 1px solid var(--border); }
 .mt-chip .mt-x { padding: 0 6px; }
+.mt-btn[aria-pressed="true"] { border-color: var(--primary); background: var(--hover); }
+.mt-headline { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; margin: 0 0 14px; }
+.mt-headline .good { color: var(--good); }
 .mt-plus { border: 1px dashed var(--border); background: none; color: var(--muted); cursor: pointer; font: inherit; font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 4px; margin-left: 6px; opacity: 0; }
 .mt-table tr:hover .mt-plus, .mt-plus:focus { opacity: 1; }
 .mt-plus:hover { color: var(--primary); border-color: var(--primary); }

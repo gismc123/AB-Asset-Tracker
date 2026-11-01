@@ -43,8 +43,20 @@ describe('what-if', () => {
   it('a lump sum gives exactly the schedule a recorded extra payment would', () => {
     const r = whatIf(LOAN, {}, { monthlyExtra: 0, fromPayment: 1, lumpSum: { date: '2025-06-10', amount: 300_000 }, dates: [] }, null);
     const real = generateSchedule(LOAN, { extraPayments: [{ id: 1, date: '2025-06-10', amount: 300_000 }] });
-    expect(r.scenario).toEqual({ payoffDate: real.rows.at(-1)!.dueDate, payments: real.rows.length, interest: real.totals.interest });
+    expect(r.scenario).toMatchObject({ payoffDate: real.rows.at(-1)!.dueDate, payments: real.rows.length, interest: real.totals.interest });
+    expect(r.scenario.paymentsLeft).toBe(real.rows.length);
     expect(r.monthsSaved).toBeGreaterThanOrEqual(5);
+  });
+
+  it('says what is left from the first payment the extra goes with', () => {
+    const r = whatIf(LOAN, {}, { monthlyExtra: 10_000, fromPayment: 3, lumpSum: null, dates: [] }, null);
+    const plain = generateSchedule(LOAN).rows;
+    expect(r.next).toEqual({ payment: 3, dueDate: plain[2]!.dueDate, extraPrincipal: 0 });
+    expect(r.current).toMatchObject({ paymentsLeft: 22, payment: plain[2]!.total });
+    expect(r.current.interestLeft).toBe(plain.slice(2).reduce((sum, row) => sum + row.interest, 0));
+    expect(r.scenario.payment).toBe(plain[2]!.total + 10_000);
+    expect(r.scenario.paymentsLeft).toBeLessThan(22);
+    expect(r.current.interestLeft - r.scenario.interestLeft).toBe(r.interestSaved);
   });
 
   it('builds on what is already recorded, and changes nothing when there is nothing to try', () => {
