@@ -209,10 +209,14 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **"Interest still to pay" replaces "interest over the loan"**: it counts from the first payment the extra would go with, so already-paid interest doesn't make the saving look small. `WhatIfPlan` adds `paymentsLeft`, `interestLeft` and `payment`; the result adds `next`. Existing fields are unchanged.
 - **Owed and equity on chosen dates are folded away**, and the dates are plain date inputs. They answer a narrower question than the payoff, and three "Compare on" fields next to the amounts made the page look like a form to fill in.
 
-## Unreleased
+## v0.2.2
 
 ### Payments booked as deposits (issue #2)
 
 - **Transactions going into an account are listed for matching too, marked *deposit*, after the payments with the same match status.** Some people book a loan payment as a deposit to the loan's own (on-budget) account in Actual, with the loan's category, instead of as a payment out of checking. Those were left out, so the month couldn't be reconciled. A deposit can also be a refund, so it never sorts above a payment unless it matches the schedule.
 - **Matching and extra payments compare and store the amount without its sign.** Only a zero amount is refused.
+
+### Lender table columns (issue #3)
+
+- **"Payment #" and "Payment" are now "Payment number" and "Payment amount", with a note on which columns are required.** They read as the same column twice. No change to how a file is read.
 
