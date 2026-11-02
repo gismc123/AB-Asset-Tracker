@@ -208,3 +208,11 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 - **The page leads with one question and one answer.** It shows what is paid now, takes an extra each month (with one-click amounts: round up to an even payment, or a few dollars more, sized to the payment) or a lump sum, and answers in one sentence over a two-column table: monthly payment, payoff month, payments left, interest still to pay.
 - **"Interest still to pay" replaces "interest over the loan"**: it counts from the first payment the extra would go with, so already-paid interest doesn't make the saving look small. `WhatIfPlan` adds `paymentsLeft`, `interestLeft` and `payment`; the result adds `next`. Existing fields are unchanged.
 - **Owed and equity on chosen dates are folded away**, and the dates are plain date inputs. They answer a narrower question than the payoff, and three "Compare on" fields next to the amounts made the page look like a form to fill in.
+
+## Unreleased
+
+### Payments booked as deposits (issue #2)
+
+- **Transactions going into an account are listed for matching too, marked *deposit*, after the payments with the same match status.** Some people book a loan payment as a deposit to the loan's own (on-budget) account in Actual, with the loan's category, instead of as a payment out of checking. Those were left out, so the month couldn't be reconciled. A deposit can also be a refund, so it never sorts above a payment unless it matches the schedule.
+- **Matching and extra payments compare and store the amount without its sign.** Only a zero amount is refused.
+

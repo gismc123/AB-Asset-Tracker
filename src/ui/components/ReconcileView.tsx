@@ -282,6 +282,7 @@ export function ReconcileView({ client, rows, adjustments, extraPayments, daily,
                         <div className="meta">
                           {date(t.date)} · {t.account ?? ''}
                           {t.isSplitPart ? ' · split' : ''}
+                          {t.deposit ? ' · deposit' : ''}
                           {t.usedByPayment !== null ? ` · already used for #${t.usedByPayment}` : ''}
                         </div>
                       </div>
@@ -537,6 +538,7 @@ function ExtraPayments({ client, row, extraPayments, daily, categoryId, onState,
                     <div style={{ fontWeight: 600 }}>{t.payee ?? 'No payee'}</div>
                     <div className="meta">
                       {date(t.date)} · {t.account ?? ''}
+                      {t.deposit ? ' · deposit' : ''}
                     </div>
                   </div>
                   <div className="amt">

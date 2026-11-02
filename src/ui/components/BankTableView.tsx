@@ -23,8 +23,8 @@ interface Props {
 
 const LABELS: Record<BankColumn, string> = {
   date: 'Date',
-  number: 'Payment #',
-  payment: 'Payment',
+  number: 'Payment number',
+  payment: 'Payment amount',
   principal: 'Principal',
   interest: 'Interest',
   balance: 'Balance',
@@ -225,6 +225,10 @@ export function BankTableView({ state, client, onState }: Props) {
                   </div>
                 ))}
               </div>
+              <p className="mt-kpi-note">
+                * Interest is required, plus principal or the payment amount. The rest is optional: months are matched by
+                payment number when the file has one, otherwise by date.
+              </p>
               <div className="mt-row" style={{ marginTop: 10 }}>
                 <label className="mt-row" style={{ cursor: 'pointer' }}>
                   <input type="checkbox" checked={header} onChange={(e) => { setPreview(null); setHeader(e.target.checked); }} />

@@ -60,9 +60,22 @@ describe('reconciliation flow', () => {
     source.add('t-other', '2025-04-01', -total, 'cat-utilities');
 
     const c = await service.candidates(1, undefined);
-    expect(c.map((t) => t.id)).toEqual(['t-exact', 't-off']);
-    expect(c[0]).toMatchObject({ matchesSchedule: true, difference: 0, paid: total });
+    expect(c.map((t) => t.id)).toEqual(['t-exact', 't-off', 't-refund']);
+    expect(c[0]).toMatchObject({ matchesSchedule: true, difference: 0, paid: total, deposit: false });
     expect(c[1]).toMatchObject({ matchesSchedule: false, difference: 5_000 });
+    expect(c[2]).toMatchObject({ deposit: true, paid: 1_000 });
+  });
+
+  it('matches a payment booked as a deposit to the loan account (issue #2)', async () => {
+    const total = row(1).total;
+    source.add('t-dep', '2025-04-01', total);
+    const c = await service.candidates(1, undefined);
+    expect(c[0]).toMatchObject({ id: 't-dep', deposit: true, matchesSchedule: true, paid: total });
+    expect((await service.match(1, { transactionId: 't-dep' })).status).toBe('paid');
+    expect(store.loan(1).getMonth(1)).toMatchObject({ status: 'paid', transactionAmount: total });
+    source.add('x-dep', '2025-04-10', 50_000);
+    const s = await service.addExtraPayment({ transactionId: 'x-dep', payment: 1 });
+    expect(s.extraPayments.map((e) => e.amount)).toEqual([50_000]);
   });
 
   it('flips an exact match straight to paid and locks the amounts', async () => {
@@ -582,8 +595,8 @@ describe('extra payments of their own', () => {
     await service.addExtraPayment({ transactionId: 't2', payment: 1 });
     await expectHttp(service.addExtraPayment({ transactionId: 't2', payment: 1 }), 409);
     await expectHttp(service.match(2, { transactionId: 't2' }), 409);
-    source.add('dep', '2025-04-12', 40_000);
-    await expectHttp(service.addExtraPayment({ transactionId: 'dep', payment: 1 }), 400);
+    source.add('zero', '2025-04-12', 0);
+    await expectHttp(service.addExtraPayment({ transactionId: 'zero', payment: 1 }), 400);
     await expectHttp(service.addExtraPayment({ transactionId: 'nope', payment: 1 }), 404);
   });
 

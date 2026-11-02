@@ -150,8 +150,14 @@ export interface Recalculation {
 }
 
 export interface Candidate extends BudgetTransaction {
-  /** Positive cents that left the account. */
+  /** Positive cents paid: what left the account, or for a deposit, what went in. */
   paid: Cents;
+  /**
+   * Money going into an account, such as a payment booked as a deposit to the
+   * loan's own account in Actual. Listed after payments, since it can also be
+   * a refund.
+   */
+  deposit: boolean;
   matchesSchedule: boolean;
   difference: Cents;
   /** Another month already matched to this transaction. */
@@ -629,20 +635,21 @@ export class LoanService {
     const cat = this.categoryOrThrow(categoryId);
     const txns = await this.fetchAround(cat, row.dueDate, wide ? WIDE_WINDOW : WINDOW_BEFORE, wide ? WIDE_WINDOW : WINDOW_AFTER);
     return txns
-      .filter((t) => t.amount < 0)
+      .filter((t) => t.amount !== 0)
       .map((t) => {
         const cmp = compareToSchedule(row, t.amount);
         const usedBy = this.store.monthForTransaction(t.id);
         return {
           ...t,
           paid: cmp.actual,
+          deposit: t.amount > 0,
           matchesSchedule: cmp.matches,
           difference: cmp.difference,
           usedByPayment: usedBy === payment ? null : usedBy,
           usedByExtra: this.store.extraForTransaction(t.id),
         };
       })
-      .sort((a, b) => Number(b.matchesSchedule) - Number(a.matchesSchedule) || a.date.localeCompare(b.date));
+      .sort((a, b) => Number(b.matchesSchedule) - Number(a.matchesSchedule) || Number(a.deposit) - Number(b.deposit) || a.date.localeCompare(b.date));
   }
 
   async match(payment: number, body: unknown): Promise<MatchResult> {
@@ -666,7 +673,7 @@ export class LoanService {
     const cat = this.categoryOrThrow(b.categoryId);
     const txn = (await this.fetchAround(cat, scheduled.dueDate, WIDE_WINDOW, WIDE_WINDOW)).find((t) => t.id === transactionId);
     if (!txn) throw new HttpError(404, "That transaction was not found in this loan's category near this due date");
-    if (txn.amount >= 0) throw new HttpError(400, 'That transaction is a deposit, not a payment');
+    if (txn.amount === 0) throw new HttpError(400, 'That transaction has no amount');
     // Daily-interest loans accrue up to the day the payment really left the bank.
     const row = setup.interestMethod === 'daily' ? this.row(this.build(setup, [payment, txn.date]), payment) : scheduled;
 
@@ -786,8 +793,8 @@ export class LoanService {
       const cat = this.categoryOrThrow(b.categoryId);
       const txn = (await this.fetchAround(cat, near.dueDate, WIDE_WINDOW, WIDE_WINDOW)).find((t) => t.id === transactionId);
       if (!txn) throw new HttpError(404, "That transaction was not found in this loan's category near this due date");
-      if (txn.amount >= 0) throw new HttpError(400, 'That transaction is a deposit, not a payment');
-      extra = { date: txn.date, amount: -txn.amount, transactionId: txn.id, transactionPayee: txn.payee, note: '' };
+      if (txn.amount === 0) throw new HttpError(400, 'That transaction has no amount');
+      extra = { date: txn.date, amount: Math.abs(txn.amount), transactionId: txn.id, transactionPayee: txn.payee, note: '' };
     } else {
       extra = { date: dateField(b, 'date'), amount: amountField(b, 'amount'), transactionId: null, transactionPayee: null, note: textField(b, 'note', 200) };
     }
