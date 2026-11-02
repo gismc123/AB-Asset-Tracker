@@ -10,6 +10,8 @@ date, among others; see [RELEASE_NOTES_v0.2.0.md](../RELEASE_NOTES_v0.2.0.md).
 v0.2.1 fixed skipped months on daily-interest loans and added
 recalculating reconciled months; see
 [RELEASE_NOTES_v0.2.1.md](../RELEASE_NOTES_v0.2.1.md).
+v0.2.2 finds payments booked as deposits when reconciling; see
+[RELEASE_NOTES_v0.2.2.md](../RELEASE_NOTES_v0.2.2.md).
 
 Nothing here has a date. Order can change with feedback, and contributions
 are welcome on any item: open an issue first for the larger ones (see
@@ -28,6 +30,11 @@ separators even though the math is right.
 - A currency and number format setting (symbol, symbol position, thousands
   and decimal separators), used on every screen and in the sidebar list.
 - Follow Actual's own number format setting where the tracker can read it.
+  Requested in issue #3. Actual 26.10 keeps it in the budget's synced
+  preferences (`defaultCurrencyCode`, `numberFormat`, `hideFraction`,
+  `currencySymbolPosition`, `currencySpaceBetweenAmountAndSymbol`), which
+  the API can read with `q('preferences')`; the currency itself is still
+  behind Actual's experimental `flags.currency`.
 - The summary endpoint keeps returning plain numbers; it gains a `currency`
   field so dashboards can format them.
 

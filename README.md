@@ -629,7 +629,9 @@ Once a month, after your bank has synced the payment into Actual:
 2. The first time, **pick the category** this loan's payments are booked to
    in Actual (it's remembered per loan).
 3. The screen lists transactions in that category within about three weeks
-   of the due date, exact matches first. **Click the right one.**
+   of the due date, exact matches first. **Click the right one.** A payment
+   booked as a deposit (money into the loan's own account in Actual) is
+   listed too, marked *deposit*, after the payments.
 
    ![Reconcile, before matching: the loan's category, one bank transaction of $2,833.12 shown as $250 over the schedule, and the scheduled breakdown](docs/screenshots/reconcile-match.png)
 
@@ -739,7 +741,7 @@ their table and those months use the lender's numbers exactly. On the
 
 1. **Choose a CSV file** or paste the table. PDF isn't supported: open the
    lender's table in a spreadsheet and save it as CSV.
-2. Check the **columns**: date, payment number, payment, principal,
+2. Check the **columns**: date, payment number, payment amount, principal,
    interest and balance. They're guessed from the column names; interest is
    required, plus principal or the payment. Set the date and number format
    if they weren't guessed right.

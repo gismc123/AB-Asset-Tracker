@@ -1,6 +1,6 @@
 {
   "name": "ab-asset-tracker",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Loan and asset tracker for a stock Actual Budget server: mortgages, car and personal loans, amortization, equity and monthly reconciliation. Read-only toward Actual.",
   "license": "MIT",
   "private": true,

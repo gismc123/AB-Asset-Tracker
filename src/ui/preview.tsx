@@ -260,18 +260,18 @@ class MockLoan {
       this.txns.push({
         id: `l${seed.loan.id}-t${k}`, date: addDays(r.dueDate, -2), amount: -(r.total + (k === seed.extraOn ? 25_000 : 0)),
         payee: seed.details.fields.servicerName ?? 'Sample Lender', account: 'Checking', notes: null, isSplitPart: false,
-        paid: 0, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null,
+        paid: 0, deposit: false, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null,
       });
     }
     const payee = seed.details.fields.servicerName ?? 'Sample Lender';
     seed.extras.forEach(([date, amount], i) => {
       const id = `l${seed.loan.id}-x${i}`;
-      this.txns.push({ id, date, amount: -amount, payee, account: 'Savings', notes: null, isSplitPart: false, paid: 0, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null });
+      this.txns.push({ id, date, amount: -amount, payee, account: 'Savings', notes: null, isSplitPart: false, paid: 0, deposit: false, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null });
       this.extras.push({ id: nextId++, date, amount, transactionId: id, transactionPayee: payee, note: '', createdAt: '' });
     });
     if (seed.spareExtra) {
       const [date, amount] = seed.spareExtra;
-      this.txns.push({ id: `l${seed.loan.id}-spare`, date, amount: -amount, payee, account: 'Savings', notes: null, isSplitPart: false, paid: 0, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null });
+      this.txns.push({ id: `l${seed.loan.id}-spare`, date, amount: -amount, payee, account: 'Savings', notes: null, isSplitPart: false, paid: 0, deposit: false, matchesSchedule: false, difference: 0, usedByPayment: null, usedByExtra: null });
     }
     for (let k = 1; k <= seed.paid; k++) {
       const txn = this.txns[k - 1]!;
