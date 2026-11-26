@@ -20,5 +20,5 @@ against the README. "Where" points at the code that implements it.
 
 ## What v0.2.0 adds
 
-See [RELEASE_NOTES_v0.2.0.md](../RELEASE_NOTES_v0.2.0.md) for the user-facing
+See [RELEASE_NOTES_v0.2.0.md](../past-releases/RELEASE_NOTES_v0.2.0.md) for the user-facing
 summary and [DECISIONS.md](DECISIONS.md) for the defaults chosen.

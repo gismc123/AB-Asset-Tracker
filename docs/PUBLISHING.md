@@ -46,5 +46,5 @@ gh repo edit --visibility public --accept-visibility-change-consequences
 # tag and release
 git tag -a v0.1.0 -m "AB Asset Tracker v0.1.0"
 git push origin v0.1.0
-gh release create v0.1.0 --title "AB Asset Tracker v0.1.0" --notes-file RELEASE_NOTES_v0.1.0.md
+gh release create v0.1.0 --title "AB Asset Tracker v0.1.0" --notes-file past-releases/RELEASE_NOTES_v0.1.0.md
 ```

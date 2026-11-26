@@ -220,3 +220,15 @@ numbers of a loan saved by v0.1.0; each new option is off until chosen.
 
 - **"Payment #" and "Payment" are now "Payment number" and "Payment amount", with a note on which columns are required.** They read as the same column twice. No change to how a file is read.
 
+
+## v0.2.3
+
+### Showing Loans as the current sidebar item
+
+- **The current link's selected look is hidden with inline styles, never by swapping classes.** Actual styles menu items, More's sub-items and account links with different classes, and an account page marks both the account and *All accounts* as current. Swapping classes gave those links the menu items' font, size and padding. Selected links keep their 4px left border (Actual takes it out of the padding), so making it transparent leaves the text in place; Loans gets the same bar as an inset shadow.
+
+### Connection status after a restart
+
+- **The loan state request retries a failed connection before reporting it, waiting at most 4 seconds.** The banner showed the last attempt's error however old it was, and loan screens without a linked account never ask Actual again, so an error from a few seconds before Actual started stayed until something else did. Requests arriving together share one try.
+- **The startup warm-up keeps trying for about 15 minutes** (5, 10, 15 seconds apart, up to a minute), then leaves retrying to requests.
+- **Old release notes live in `past-releases/`;** only the current version's notes stay at the root.
