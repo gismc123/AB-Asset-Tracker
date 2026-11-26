@@ -5,7 +5,8 @@ Answers to common questions about AB Asset Tracker. Back to the [README](../READ
 ## General
 
 **Does this change my Actual budget?**
-No. The tracker only reads categories and transactions. It never creates,
+No. The tracker only reads categories, transactions and the balances of
+accounts you link to it. It never creates,
 changes or deletes anything in your budget, and Actual's own files and
 container aren't modified.
 
@@ -96,10 +97,10 @@ next start. Your loan data isn't in it.
 ## Loans
 
 **Which kinds of loans can I track?**
-Mortgages, auto loans and personal loans. Any other fixed-rate loan with
-monthly payments (student loan, boat or RV loan, equipment loan) works as a
-*personal loan*; add an asset to it if it paid for something with a resale
-value.
+Mortgages, auto loans, personal loans and student loans. Any other
+fixed-rate loan with monthly payments (boat or RV loan, equipment loan)
+works as a *personal loan*; add an asset to it if it paid for something
+with a resale value.
 
 **I've been paying on my loan for years. Do I have to enter every payment?**
 No. Enter the original terms, tick *Already paying on this loan?*, and enter
@@ -127,10 +128,15 @@ Rate changes can't be modeled. After a refinance, archive the old loan and
 add the new one (use *Already paying on this loan?* if you set it up late).
 
 **I made an extra principal payment as its own transaction.**
-Match the regular payment as usual, then record the extra as *extra
-principal* with that month or the next one. On a daily-interest loan that
-charges a few days more interest than your lender does; see
-[Known limitations](KNOWN_LIMITATIONS.md).
+Match the regular payment as usual, then add the extra under **Extra
+principal paid on its own** on the Reconcile screen: pick it from Actual, or
+enter its date and amount by hand. It applies on its own date, and a month
+can have any number of extras. See
+[Extra payments](../README.md#extra-payments).
+
+**I book loan payments as a deposit into the loan's account in Actual.**
+That works. Deposits with the loan's category are listed on Reconcile too,
+marked *deposit*, after the payments.
 
 **My bank splits the payment into principal, interest and escrow categories.**
 Keep the whole loan payment in one category in Actual (one transaction, or a
