@@ -68,4 +68,33 @@ describe('ActualApiSource', () => {
     expect(source.status()).toMatchObject({ connected: true, error: null });
     expect(api.sync).toHaveBeenCalledTimes(2);
   });
+
+  it('tries again before reporting a failed first load, so an old error is not shown', async () => {
+    const api = fakeApi();
+    // Actual still starting after a reboot.
+    api.init.mockRejectedValueOnce(new Error('Authentication failed: network-failure'));
+    const source = sourceWith(api);
+    await expect(source.getCategories()).rejects.toBeInstanceOf(SourceUnavailable);
+    expect(source.status()).toMatchObject({ connected: false, error: 'Authentication failed: network-failure' });
+
+    // Requests arriving together share one try.
+    await Promise.all([source.checkConnection(), source.checkConnection()]);
+    expect(api.init).toHaveBeenCalledTimes(2);
+    expect(source.status()).toMatchObject({ connected: true, error: null });
+
+    // Once connected, checking asks Actual nothing.
+    await source.checkConnection();
+    expect(api.init).toHaveBeenCalledTimes(2);
+    expect(api.sync).not.toHaveBeenCalled();
+  });
+
+  it('keeps the error when Actual is still unreachable on the new try', async () => {
+    const api = fakeApi();
+    api.init.mockRejectedValue(new Error('Authentication failed: network-failure'));
+    const source = sourceWith(api);
+    await expect(source.getCategories()).rejects.toBeInstanceOf(SourceUnavailable);
+    await expect(source.checkConnection()).resolves.toBeUndefined();
+    expect(api.init).toHaveBeenCalledTimes(2);
+    expect(source.status()).toMatchObject({ connected: false, error: 'Authentication failed: network-failure' });
+  });
 });

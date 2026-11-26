@@ -146,6 +146,8 @@ export function createApp(deps: AppDeps) {
 
   loan.get('/state', async (req, res) => {
     const svc = one(req);
+    // The screen shows an error banner from the connection status.
+    await service.checkSource();
     await service.refreshLinked();
     res.json(svc.state());
   });

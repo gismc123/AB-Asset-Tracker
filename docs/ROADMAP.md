@@ -6,12 +6,14 @@ gaps are listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md); this page
 says which ones will be closed and how.
 
 v0.2.0 shipped the what-if calculator and extra payments on their own
-date, among others; see [RELEASE_NOTES_v0.2.0.md](../RELEASE_NOTES_v0.2.0.md).
+date, among others; see [RELEASE_NOTES_v0.2.0.md](../past-releases/RELEASE_NOTES_v0.2.0.md).
 v0.2.1 fixed skipped months on daily-interest loans and added
 recalculating reconciled months; see
-[RELEASE_NOTES_v0.2.1.md](../RELEASE_NOTES_v0.2.1.md).
+[RELEASE_NOTES_v0.2.1.md](../past-releases/RELEASE_NOTES_v0.2.1.md).
 v0.2.2 finds payments booked as deposits when reconciling; see
-[RELEASE_NOTES_v0.2.2.md](../RELEASE_NOTES_v0.2.2.md).
+[RELEASE_NOTES_v0.2.2.md](../past-releases/RELEASE_NOTES_v0.2.2.md).
+v0.2.3 fixes the sidebar while a loan is open and a stale connection error
+after a restart; see [RELEASE_NOTES_v0.2.3.md](../RELEASE_NOTES_v0.2.3.md).
 
 Nothing here has a date. Order can change with feedback, and contributions
 are welcome on any item: open an issue first for the larger ones (see

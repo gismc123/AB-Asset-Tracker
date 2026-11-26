@@ -17,6 +17,11 @@ export interface BudgetSource {
   /** An account's balance in cents (Actual's sign: assets positive, debts negative), counting transactions dated up to `asOf`. */
   getAccountBalance(accountId: string, asOf: ISODate): Promise<Cents>;
   status(): SourceStatus;
+  /**
+   * When the last try to reach Actual failed, try again so `status()` says how
+   * things are now, not how they were. Never throws.
+   */
+  checkConnection(): Promise<void>;
 }
 
 export interface BudgetAccount {
@@ -77,12 +82,17 @@ const EARLIEST = '1900-01-01';
 /** Only re-sync with the server when data is older than this. */
 const SYNC_INTERVAL_MS = 30_000;
 
+/** How long `checkConnection` waits for its try before answering with the status as it is. */
+const RECHECK_WAIT_MS = 4_000;
+
 type ActualApi = typeof import('@actual-app/api');
 
 export class ActualApiSource implements BudgetSource {
   private api: ActualApi | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private lastSyncAt = 0;
+  /** A `checkConnection` try in progress, shared by requests that arrive meanwhile. */
+  private recheck: Promise<void> | null = null;
   private state: SourceStatus = { connected: false, lastSync: null, error: null };
 
   constructor(
@@ -93,6 +103,23 @@ export class ActualApiSource implements BudgetSource {
 
   status(): SourceStatus {
     return { ...this.state };
+  }
+
+  async checkConnection(): Promise<void> {
+    if (this.state.connected) return;
+    this.recheck ??= this.serialized(() => this.connected())
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => {
+        this.recheck = null;
+      });
+    // Don't hold up the page for long; the try carries on in the background.
+    let timer: NodeJS.Timeout | undefined;
+    const waited = new Promise<void>((resolve) => (timer = setTimeout(resolve, RECHECK_WAIT_MS)));
+    await Promise.race([this.recheck, waited]);
+    clearTimeout(timer);
   }
 
   /** @actual-app/api is a singleton, so every call goes through one queue. */

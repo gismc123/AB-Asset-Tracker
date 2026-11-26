@@ -68,6 +68,8 @@ export class FakeSource implements BudgetSource {
     return { connected: true, lastSync: '2025-01-01T00:00:00.000Z', error: null };
   }
 
+  async checkConnection(): Promise<void> {}
+
   async getCategories(): Promise<CategoryGroup[]> {
     return [
       {

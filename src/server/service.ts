@@ -1209,6 +1209,11 @@ export class TrackerService {
     await this.linked.refresh(this.store.linkedAccountIds(), this.today());
   }
 
+  /** Before showing Actual's connection status: retry a failed connection, so an old error isn't shown. */
+  async checkSource(): Promise<void> {
+    await this.source.checkConnection();
+  }
+
   /** The budget's accounts, to pick one to link. */
   accounts(): Promise<BudgetAccount[]> {
     return this.source.getAccounts();
