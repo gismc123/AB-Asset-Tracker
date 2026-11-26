@@ -186,48 +186,58 @@ function start() {
   };
 
   // While the loans screen is open, the sidebar should show Loans as the
-  // current page, not the page underneath. Actual styles its current link
-  // with one class, so swap classes with that link and swap back on close.
-  let itemClass = '';
-  let demoted: { link: HTMLAnchorElement; className: string } | null = null;
+  // current page, not the page underneath. Actual marks its current link
+  // with a 4px left border and the selected text color, on top of classes
+  // that differ per kind of link (menu items, accounts, More's sub-items).
+  // So never move classes between links: hide the current link's selected
+  // look with inline styles, draw it on Loans the same way, and remove both
+  // on close. Swapping classes once gave an account link the menu items'
+  // font, size and padding (and Loans an account's).
+  const demoted = new Set<HTMLAnchorElement>();
 
   const restoreDemoted = () => {
-    if (!demoted) return;
-    // After Back/Forward the page may have changed under us; then Actual has
-    // moved on and the link should stay unselected.
-    if (demoted.link.pathname === location.pathname) {
-      demoted.link.className = demoted.className;
-      demoted.link.setAttribute('aria-current', 'page');
+    for (const link of demoted) {
+      link.style.borderLeftColor = '';
+      link.style.color = '';
+      const dot = link.querySelector<HTMLElement>('.dot');
+      if (dot) dot.style.transform = '';
+      // After Back/Forward the page may have changed under us; then Actual has
+      // moved on and the link should stay unselected.
+      if (link.pathname === location.pathname) link.setAttribute('aria-current', 'page');
     }
-    demoted = null;
+    demoted.clear();
   };
 
   const markActive = (active: boolean) => {
     if (!item) return;
     if (!active) {
       restoreDemoted();
-      item.className = itemClass;
       item.removeAttribute('aria-current');
-      item.style.background = '';
       item.style.boxShadow = '';
+      item.style.color = '';
       return;
     }
     item.setAttribute('aria-current', 'page');
+    // Actual's selected look is a 4px border inside the same total width;
+    // an inset shadow draws it without moving the label.
+    item.style.boxShadow = 'inset 4px 0 0 var(--color-sidebarItemTextSelected, #8719e0)';
+    item.style.color = 'var(--color-sidebarItemTextSelected, #8719e0)';
     const sidebar = findSidebar(item);
-    const current = sidebar?.querySelector<HTMLAnchorElement>(`a[aria-current="page"]:not([${ITEM_ATTR}])`);
-    if (current && current !== demoted?.link) {
-      restoreDemoted();
-      demoted = { link: current, className: current.className };
-    }
-    if (demoted) {
-      // Re-applied on every call in case Actual re-rendered the link.
-      demoted.link.className = itemClass;
-      demoted.link.removeAttribute('aria-current');
-      item.className = demoted.className;
-    } else {
-      // No current link to borrow from: approximate Actual's look.
-      item.style.background = 'var(--color-sidebarItemBackgroundHover, rgba(255,255,255,0.08))';
-      item.style.boxShadow = 'inset 3px 0 0 var(--color-sidebarItemAccentSelected, #8719e0)';
+    sidebar?.querySelectorAll<HTMLAnchorElement>(`a[aria-current="page"]:not([${ITEM_ATTR}])`).forEach((link) => demoted.add(link));
+    // Re-applied on every call in case Actual re-rendered the links. Selected
+    // links keep their 4px border (Actual took it out of the padding), so
+    // making it transparent leaves the text exactly where it was.
+    for (const link of demoted) {
+      if (!link.isConnected) {
+        demoted.delete(link);
+        continue;
+      }
+      link.removeAttribute('aria-current');
+      link.style.borderLeftColor = 'transparent';
+      link.style.color = 'var(--color-sidebarItemText)';
+      // A bank-connected account's status dot slides left when selected.
+      const dot = link.querySelector<HTMLElement>('.dot');
+      if (dot) dot.style.transform = 'none';
     }
   };
 
@@ -307,7 +317,6 @@ function start() {
     const found = findSidebarLinks();
     if (!found) return; // not logged in yet, a modal is up, or mobile layout
     item = buildItem(found.template);
-    itemClass = item.className;
     item.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();

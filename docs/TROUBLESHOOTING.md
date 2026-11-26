@@ -53,8 +53,13 @@ same login.
 
 **"Can't read from Actual right now"** on the loan screens.
 The backend lost its connection to Actual. Check the backend log (see
-above). Deleting `data/actual-cache/` and restarting the backend forces a
-fresh download of the budget; your loan data isn't affected.
+above). With `Authentication failed: network-failure` the backend couldn't
+reach Actual at all. The loan screen tries to connect again every time it
+loads, so the message means Actual can't be reached right now: check that
+Actual is running and that `ACTUAL_SERVER_URL` works from the backend
+container.
+Deleting `data/actual-cache/` and restarting the backend forces a fresh
+download of the budget; your loan data isn't affected.
 
 **Behind Cloudflare: a `502 Bad Gateway` or *Bad gateway* error page.**
 `cloudflared` can't reach the add-on.
