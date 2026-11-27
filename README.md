@@ -577,6 +577,10 @@ Each loan has these screens:
 | **Details** | Reference details that fit the loan type: servicer, account number, lender, insurance, and for a mortgage the property, tax parcel and PMI certificate, or for a vehicle the VIN and plate. Plus notes and fields of your own. |
 | **Setup** | The loan terms you enter once, with a live preview, plus rename, archive and delete. |
 
+**Settings**, at the end of the loan tabs, shows the version you are running
+with a link to its release notes, plus the privacy notice and terms of use.
+The same version and links are in the footer of every Loans screen.
+
 ### Example: a mortgage
 
 A $320,000 loan at 6.5% for 30 years on a $355,000 home, with $148 a month

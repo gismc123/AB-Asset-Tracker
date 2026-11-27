@@ -1,8 +1,8 @@
 import type { LoanListItem } from '../api.js';
 import { TypeIcon } from './TypeIcon.js';
 
-/** What's on screen: a loan, the add-loan wizard, or backup and restore. */
-export type PickerScreen = 'loan' | 'add' | 'backup';
+/** What's on screen: a loan, the add-loan wizard, backup and restore, or settings. */
+export type PickerScreen = 'loan' | 'add' | 'backup' | 'settings';
 
 interface Props {
   loans: LoanListItem[];
@@ -12,7 +12,7 @@ interface Props {
   screen: PickerScreen;
 }
 
-/** Every active loan as a tab, plus the buttons that add one and open backups. Archived loans are left out. */
+/** Every active loan as a tab, plus the buttons that add one, open backups and open settings. Archived loans are left out. */
 export function LoanPicker({ loans, selected, onSelect, onScreen, screen }: Props) {
   const active = loans.filter((l) => !l.loan.archived);
   return (
@@ -36,6 +36,9 @@ export function LoanPicker({ loans, selected, onSelect, onScreen, screen }: Prop
       </button>
       <button type="button" className="mt-loan-tab" aria-selected={screen === 'backup'} onClick={() => onScreen('backup')} title="Backup and restore">
         Backup
+      </button>
+      <button type="button" className="mt-loan-tab" aria-selected={screen === 'settings'} onClick={() => onScreen('settings')} title="Version, privacy and terms">
+        Settings
       </button>
     </div>
   );
