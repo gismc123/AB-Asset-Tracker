@@ -33,6 +33,9 @@ and is not affiliated with or endorsed by the Actual Budget project.
   can't add containers won't work.
 - **Docker with the Compose plugin, and git**, on that machine (Linux,
   macOS or Windows; a Raspberry Pi works).
+- **For an existing Actual, its port published** (5006 by default), so the
+  add-on can reach it. If you run Actual in Docker, its compose file needs
+  a `ports:` line such as `"5006:5006"`. Install step 1 checks this.
 - **Actual in a web browser, opened through the add-on's port** (5007 by
   default) instead of Actual's own port. The add-on adds the Loans tab to
   the pages it passes through, so Actual opened any other way has no
@@ -59,6 +62,9 @@ and is not affiliated with or endorsed by the Actual Budget project.
 - [Requirements](#requirements)
 - [Known limitations](#known-limitations)
 - [Install](#install)
+  - [Stuck? What to check](#stuck-what-to-check)
+  - [Behind Caddy](#behind-caddy)
+  - [Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy)
 - [Update](#update)
 - [Uninstall](#uninstall)
 - [What it does](#what-it-does)
@@ -80,7 +86,33 @@ More documentation:
 
 ## Install
 
-About 10 minutes. You only do this once.
+About 15 minutes. You only do this once. If you get stuck, jump to
+[Stuck? What to check](#stuck-what-to-check): the step where it stops
+usually tells you what's wrong.
+
+### How it fits together
+
+The add-on is **two small containers that sit in front of your Actual**.
+You open Actual through the add-on's port (5007) instead of Actual's own
+port (5006). The add-on passes everything through to Actual and adds the
+Loans tab on the way.
+
+```
+ browser ──▶ add-on :5007 ──▶ your Actual :5006
+             (adds Loans)     (not changed)
+```
+
+That means:
+
+- **Your Actual container stays exactly as it is.** You don't move it,
+  rebuild it or change its settings.
+- **The add-on gets its own folder and its own small compose file.** Even
+  if you keep all your other services in one big `docker-compose.yml`, you
+  don't add the add-on to it. It runs on its own and reaches Actual
+  through the port Actual already publishes on this machine.
+- **A reverse proxy (Caddy, Nginx Proxy Manager, Traefik) or a Cloudflare
+  Tunnel stays too.** At the very end you point it at port 5007 instead
+  of 5006. That's the only change to it.
 
 ### Before you start
 
@@ -91,57 +123,115 @@ You need:
 - [ ] **git**. Check with `git --version`.
 - [ ] Your **Actual server password**, the one on Actual's login screen.
 - [ ] Your budget's **Sync ID**: in Actual, *Settings → Show advanced
-      settings → Sync ID*. (On a fresh install you get it in step 6.)
+      settings → Sync ID*. (On a fresh install you get it in step 7.)
+
+Run every command below in a terminal on the machine where Docker runs.
+
+<details>
+<summary><b>Windows with WSL</b> (Docker inside Ubuntu, with or without Docker Desktop)</summary>
+
+That works. Run every command in your **Ubuntu (WSL) terminal**, not in
+PowerShell. Put the add-on in your Linux home folder (`cd ~` first), not
+under `/mnt/c/...`: the tracker's database is happier on the Linux side.
+Your Windows browser reaches the containers at `http://localhost:...` as
+usual.
+
+</details>
 
 Then pick your setup:
 
 | | Setup | Pick it if |
 |---|---|---|
-| **A** | **Existing Actual** | You already run Actual on this machine, for example from its own Docker container on port 5006. Most people. Your Actual container isn't touched. |
+| **A** | **Existing Actual** | You already run Actual, for example in its own Docker container or in your big compose file next to other services. Most people. Your Actual container isn't touched. |
 | **B** | **Fresh install** | You don't run Actual yet. This starts Actual and the add-on together. |
 
-Reach Actual through a **Cloudflare Tunnel** or your own HTTPS reverse
-proxy? Pick A or B as usual, and read
-[Behind a Cloudflare Tunnel or another HTTPS proxy](#behind-a-cloudflare-tunnel-or-another-https-proxy)
-before step 3.
+### Step 1 (setup A only): Check that Actual answers on port 5006
 
-### Step 1: Download
+The add-on reaches your Actual through the port Actual publishes on this
+machine, so check that first:
+
+```sh
+curl -I http://localhost:5006
+```
+
+| What you see | What it means |
+|---|---|
+| `HTTP/1.1 200 OK` | Actual uses **plain HTTP**. Good. Remember `http` for step 4. |
+| `Empty reply from server`, or a message about SSL or HTTP being sent to an HTTPS port | Actual may use **HTTPS**. Try `curl -kI https://localhost:5006`. If that says `200 OK`, remember `https` for step 4. |
+| `Connection refused` | Port 5006 isn't published on this machine. See below. |
+
+**Connection refused?** Actual is probably reachable only inside Docker
+(for example by your reverse proxy, by container name). Open the compose
+file Actual is in, find the Actual service, and make sure it has:
+
+```yaml
+    ports:
+      - "5006:5006"
+```
+
+Then run `docker compose up -d` **in that compose file's folder** (this
+restarts Actual with the port published; its data isn't affected) and run
+the `curl` line again.
+
+- Use `"5006:5006"`, not `"127.0.0.1:5006:5006"`. On Linux the add-on's
+  containers reach this machine through Docker's network, and a port
+  bound to `127.0.0.1` only answers on this machine itself.
+- Actual on **another machine**? Run the same check there, and use that
+  machine's address in step 4.
+
+### Step 2: Download
 
 ```sh
 git clone https://github.com/gismc123/AB-Asset-Tracker.git ab-asset-tracker
 cd ab-asset-tracker
 ```
 
-### Step 2: Create your settings file
+This makes a folder called `ab-asset-tracker`. Every command from here on
+runs inside it.
+
+### Step 3: Create your settings file
 
 ```sh
 cp .env.example .env
 mkdir -p data certs
 ```
 
-### Step 3: Fill in `.env`
+### Step 4: Fill in `.env`
 
-Open `.env` in any editor (for example `nano .env`) and set these lines.
-Leave everything else as it is.
+Open the file:
 
-**Setup A (existing Actual)**, for an Actual on the same machine on port 5006:
+```sh
+nano .env
+```
+
+Change the lines below and leave everything else as it is. Each of these
+lines is already in the file, so edit the existing line instead of adding
+a second one. In `nano`, save with **Ctrl+O** then **Enter**, and leave
+with **Ctrl+X**.
+
+**Setup A (existing Actual):**
 
 ```ini
 COMPOSE_FILE=compose.existing-actual.yml
-ACTUAL_SERVER_URL=https://actual:5006
-ACTUAL_UPSTREAM=https://actual:5006
+ACTUAL_SERVER_URL=http://actual:5006
+ACTUAL_UPSTREAM=http://actual:5006
 ACTUAL_PASSWORD=your-actual-server-password
 ACTUAL_SYNC_ID=your-budget-sync-id
-TZ=Europe/Berlin
+TZ=America/Denver
 ```
 
-- Write `http://` instead of `https://` in both URLs if your Actual uses
-  plain HTTP.
-- Keep the host name `actual`: it means "this machine" inside the
-  containers. If Actual runs on another machine, use its address instead
-  (for example `https://192.0.2.10:5006`).
-- If Actual uses a self-signed certificate, see
-  [Actual's certificate is self-signed](#actual-uses-a-self-signed-certificate).
+- **`http` or `https`:** use what step 1 showed, in both URLs.
+- **Keep the word `actual` exactly as written.** It isn't your Actual
+  container's name. It's a nickname the add-on uses for *this machine*,
+  so it works whatever your Actual container is called.
+- **Actual on another machine?** Use its address instead, for example
+  `http://192.0.2.10:5006`.
+- **Caddy, another reverse proxy or a Cloudflare Tunnel in front of
+  Actual?** Also set `PROXY_TLS=off`, because that already handles HTTPS.
+  It's exactly `off` (or `on`), not `false`. See
+  [step 9](#step-9-optional-put-your-reverse-proxy-or-tunnel-in-front).
+- Actual uses a self-signed certificate? See
+  [Actual uses a self-signed certificate](#actual-uses-a-self-signed-certificate).
 
 **Setup B (fresh install):**
 
@@ -149,44 +239,55 @@ TZ=Europe/Berlin
 COMPOSE_FILE=docker-compose.yml
 ACTUAL_SERVER_URL=http://actual:5006
 ACTUAL_UPSTREAM=http://actual:5006
-TZ=Europe/Berlin
+TZ=America/Denver
 ```
 
 Leave `ACTUAL_PASSWORD` and `ACTUAL_SYNC_ID` empty for now; you fill them in
-at step 6. Also create the folder for Actual's data: `mkdir -p actual-data`.
+at step 7. Also create the folder for Actual's data: `mkdir -p actual-data`.
 
-`TZ` is your timezone as a [tz database name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
-(it decides what "today" is). `COMPOSE_FILE` tells Docker Compose which
-setup you chose, so every command from here on is plain `docker compose`.
+**Both setups:** `TZ` is your timezone as a
+[tz database name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones),
+such as `America/New_York` or `Europe/Berlin` (it decides what "today" is).
+`COMPOSE_FILE` tells Docker Compose which setup you chose, so every command
+from here on is plain `docker compose`, with no `-f`.
 
-### Step 4: Start it
+### Step 5: Start it
 
 ```sh
 docker compose up -d
 ```
 
 The first start builds two small images, which takes a few minutes (longer
-on a Raspberry Pi). Later starts take seconds.
+on a Raspberry Pi). Later starts take seconds. Then check:
 
-### Step 5: Open it
+```sh
+docker compose ps
+```
 
-Open **`https://<this-machine>:5007`** in your browser. That's port **5007**,
-the add-on's port, not Actual's 5006.
+You should see two services, `asset-tracker-backend` (*healthy* after a
+minute) and `asset-tracker-proxy` (*running*). For setup B, `actual` is
+there too, and the backend keeps restarting until step 7; that's expected.
 
-Your browser warns about the certificate the first time, because the add-on
-made its own. Accept it to continue, or
-[use a real certificate](#use-a-real-certificate).
+### Step 6: Open it, on this machine first
 
-Behind a Cloudflare Tunnel or your own HTTPS proxy, open your public name
-instead (for example `https://budget.example.com`), once the tunnel points
-at port 5007.
+Open the add-on in a browser **directly, before putting any reverse proxy
+or tunnel in front**. If this works, the add-on itself is fine, and
+anything that goes wrong later is in the proxy setup.
 
-Log in to Actual as usual. **Loans** appears in the sidebar (for setup B,
-once you've finished step 6).
+| Your `PROXY_TLS` | Open |
+|---|---|
+| `on` (the default) | `https://localhost:5007` on this machine, or `https://<this-machine's-address>:5007` from another device. The browser warns about the certificate the first time, because the add-on made its own. Accept it, or [use a real certificate](#use-a-real-certificate). |
+| `off` | `http://localhost:5007`, **on this machine only** (on Windows with WSL, your Windows browser counts). Actual refuses plain `http://` on any other address. From other devices you go through your reverse proxy or tunnel (step 9). |
 
-### Step 6 (setup B only): Create your budget, then connect the tracker
+That's port **5007**, the add-on's port, not Actual's 5006.
 
-1. In the page from step 5, set your Actual password and create (or import)
+Log in to Actual as usual. **Loans** appears in Actual's sidebar (for
+setup B, once you've finished step 7). If you see Actual but no Loans,
+hard-reload once (Ctrl+Shift+R / Cmd+Shift+R).
+
+### Step 7 (setup B only): Create your budget, then connect the tracker
+
+1. In the page from step 6, set your Actual password and create (or import)
    your budget, as on any new Actual server.
 2. Copy the Sync ID (*Settings → Show advanced settings → Sync ID*).
 3. Put the password and Sync ID in `.env`:
@@ -196,39 +297,114 @@ once you've finished step 6).
    ```
 4. Run `docker compose up -d` again.
 
-Until then, `asset-tracker-backend` keeps restarting and its log says
-`Missing required setting(s): ACTUAL_PASSWORD, ACTUAL_SYNC_ID`. That's
-expected; it starts properly once both are filled in.
-
-### Step 7: Check it worked
+### Step 8: Check the connection to your budget
 
 ```sh
-docker compose ps
 docker compose logs asset-tracker-backend | grep asset-tracker
 ```
 
-`docker compose ps` should show `asset-tracker-backend` as *healthy* and
-`asset-tracker-proxy` as *running*. The log should end with
-`[asset-tracker] connected to Actual and loaded the budget`.
+The log should end with
+`[asset-tracker] connected to Actual and loaded the budget`. If it
+doesn't, the line above it says what's wrong; see
+[Stuck? What to check](#stuck-what-to-check).
 
-If it doesn't, the log line above it says what's wrong; see
-[Troubleshooting](docs/TROUBLESHOOTING.md).
+### Step 9 (optional): Put your reverse proxy or tunnel in front
 
-### Step 8: Add your first loan
+Only once step 6 works. Point your reverse proxy or tunnel at **port 5007
+instead of 5006**, and make sure `.env` has `PROXY_TLS=off` (run
+`docker compose up -d` after changing it).
+
+- **Caddy:** see [Behind Caddy](#behind-caddy) below.
+- **Cloudflare Tunnel:** see
+  [Behind a Cloudflare Tunnel](#behind-a-cloudflare-tunnel-or-another-https-proxy).
+- **Nginx Proxy Manager, Traefik, Tailscale Serve:** point the entry you
+  use for Actual at `http://<this-machine>:5007`, keep WebSocket support
+  on, and let it pass `X-Forwarded-Proto` along.
+
+Then open your usual address for Actual (for example
+`https://budget.home.lan`). Loans is in the sidebar.
+
+### Step 10: Add your first loan
 
 Click **Loans** in Actual's sidebar. The welcome screen asks what kind of
 loan to add, then shows only the fields that kind needs.
 
 ![The first-run welcome screen: a short explanation, then a choice of mortgage, auto loan, personal loan or student loan](docs/screenshots/first-run.png)
 
- Have your loan paperwork or a recent statement at hand. See [Adding a loan](#adding-a-loan)
-for what each field means.
+Have your loan paperwork or a recent statement at hand. See
+[Adding a loan](#adding-a-loan) for what each field means.
 
 > **All set?** AB Asset Tracker is free and built in spare time. If it's
 > useful to you, you can chip in on [Patreon](https://patreon.com/IvanS1123).
 > It's entirely optional; every feature is free either way.
 
 ---
+
+### Stuck? What to check
+
+Find the step where it stops:
+
+| Where it stops | Usually means | What to do |
+|---|---|---|
+| Step 1: `Connection refused` | Actual's port isn't published on this machine. | Add `- "5006:5006"` under `ports:` for Actual, as in [step 1](#step-1-setup-a-only-check-that-actual-answers-on-port-5006). |
+| Step 5: `port is already allocated` | Something else uses port 5007. | Set `PROXY_PORT=5008` (or any free port) in `.env`, run `docker compose up -d`, and open that port instead. |
+| Step 5: `asset-tracker-proxy` keeps restarting | A setting the proxy reads is wrong. | `docker compose logs asset-tracker-proxy`. *"PROXY_TLS must be on or off"*: write exactly `on` or `off`. |
+| Step 5: `asset-tracker-backend` keeps restarting | A setting is missing or wrong. | Step 8's log line names it: *Missing required setting(s)*, *Authentication failed* (check the password and the two URLs), or a certificate error. |
+| Step 6: `502 Bad Gateway` | The add-on can't reach Actual. | Check step 1 again, and that both URLs in `.env` use `actual` (or the right address) and the same `http`/`https` as step 1. |
+| Step 6: blank page, or Actual says it needs HTTPS | `PROXY_TLS=off` on an address other than `localhost`. | Open `http://localhost:5007` on this machine, or set `PROXY_TLS=on` for now. |
+| Step 6: Actual works, but no Loans | The page didn't come through port 5007, or is cached. | Check the address bar says `:5007` and hard-reload (Ctrl+Shift+R). Make the window wider: Actual's mobile layout has no sidebar. |
+| Step 9: Loans worked on 5007, but not through the proxy | The proxy still points at 5006, or can't reach 5007. | See [Behind Caddy](#behind-caddy) (a proxy running in Docker can't use `localhost`). |
+
+Still stuck? Run these from the `ab-asset-tracker` folder:
+
+```sh
+docker compose ps
+docker compose logs --tail 50
+```
+
+and [open an issue](https://github.com/gismc123/AB-Asset-Tracker/issues)
+saying which step it stopped at, with that output. Before posting, check
+that it shows no password or Sync ID. More cases are in
+[Troubleshooting](docs/TROUBLESHOOTING.md).
+
+---
+
+### Behind Caddy
+
+Caddy keeps handling HTTPS and your local name; only its target for Actual
+changes, from port 5006 to the add-on's 5007.
+
+1. In `.env`, set `PROXY_TLS=off` and keep `PROXY_PORT=5007`, then run
+   `docker compose up -d`.
+2. Check [step 6](#step-6-open-it-on-this-machine-first) works at
+   `http://localhost:5007`.
+3. In your `Caddyfile`, change Actual's entry so it goes to port 5007:
+
+   ```
+   budget.home.lan {
+       reverse_proxy 192.0.2.10:5007
+   }
+   ```
+
+   Keep whatever else the entry has (for example `tls internal`). Only the
+   `reverse_proxy` line changes.
+
+   **Which address?** Caddy installed directly on this machine can use
+   `localhost:5007`. **Caddy running in Docker can't**: inside its
+   container, `localhost` means Caddy's own container. Use this machine's
+   network address instead (`hostname -I` shows it; on WSL, use the first
+   one it prints). An old entry like `reverse_proxy actual:5006` that uses
+   Actual's container name has to change too, since the add-on isn't in
+   Caddy's compose file.
+
+4. Reload Caddy (`docker compose restart caddy` in Caddy's folder, using
+   your Caddy service's name, or `sudo systemctl reload caddy`), open your
+   usual address, and log in. **Loans** is in the sidebar.
+
+Caddy already passes WebSockets and `X-Forwarded-Proto` along, so nothing
+else is needed. If you get `502 Bad Gateway` from Caddy, it can't reach
+port 5007 at the address you gave: try `curl -I http://<that-address>:5007`
+from the machine Caddy runs on.
 
 ### Behind a Cloudflare Tunnel or another HTTPS proxy
 
@@ -400,6 +576,10 @@ Each loan has these screens:
 | **What if** | Try a higher monthly payment or a one-time lump sum without saving anything: the payoff date, months sooner and interest saved, next to the loan as it stands. See [What if](#what-if). |
 | **Details** | Reference details that fit the loan type: servicer, account number, lender, insurance, and for a mortgage the property, tax parcel and PMI certificate, or for a vehicle the VIN and plate. Plus notes and fields of your own. |
 | **Setup** | The loan terms you enter once, with a live preview, plus rename, archive and delete. |
+
+**Settings**, at the end of the loan tabs, shows the version you are running
+with a link to its release notes, plus the privacy notice and terms of use.
+The same version and links are in the footer of every Loans screen.
 
 ### Example: a mortgage
 

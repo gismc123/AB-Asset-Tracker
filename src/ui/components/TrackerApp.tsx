@@ -21,6 +21,7 @@ import { PayoffCard } from './PayoffCard.js';
 import { PmiCountdown } from './PmiCountdown.js';
 import { ReconcileView } from './ReconcileView.js';
 import { ScheduleView } from './ScheduleView.js';
+import { Footer, SettingsView, type SettingsSection } from './SettingsView.js';
 import { SetupForm } from './SetupForm.js';
 import { SummaryCards } from './SummaryCards.js';
 import { WhatIfView } from './WhatIfView.js';
@@ -66,6 +67,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
   const [loans, setLoans] = useState<LoanListItem[] | null>(null);
   const [selected, setSelected] = useState<number | null>(initialLoan ?? remembered());
   const [screen, setScreen] = useState<PickerScreen>('loan');
+  const [section, setSection] = useState<SettingsSection>('about');
   const [error, setError] = useState<ApiError | null>(null);
 
   const refreshLoans = useCallback(async () => {
@@ -113,6 +115,30 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
     }
   };
 
+  const openSettings = (next: SettingsSection) => {
+    setSection(next);
+    setScreen('settings');
+  };
+  const footer = <Footer onOpen={openSettings} />;
+
+  if (screen === 'settings') {
+    return (
+      <div className="mt-page">
+        <Header title="Settings" subtitle="Version, privacy and terms for the tracker">
+          {loans && loans.length > 0 ? (
+            <LoanPicker loans={loans} selected={current?.loan.id ?? null} onSelect={select} onScreen={setScreen} screen="settings" />
+          ) : (
+            <button type="button" className="mt-btn" onClick={() => setScreen('loan')}>
+              Back
+            </button>
+          )}
+        </Header>
+        <SettingsView section={section} onSection={setSection} />
+        {footer}
+      </div>
+    );
+  }
+
   if (error && !loans) {
     return (
       <div className="mt-page">
@@ -125,6 +151,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
             </button>
           </div>
         </div>
+        {footer}
       </div>
     );
   }
@@ -133,6 +160,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
       <div className="mt-page">
         <Header title="Loans" />
         <div className="mt-empty">Loading…</div>
+        {footer}
       </div>
     );
   }
@@ -161,6 +189,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
             onChange?.();
           }}
         />
+        {footer}
       </div>
     );
   }
@@ -180,6 +209,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
             </button>
           </p>
         )}
+        {footer}
       </div>
     );
   }
@@ -189,6 +219,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
       key={current.loan.id}
       client={client.loan(current.loan.id)}
       picker={picker('loan')}
+      footer={footer}
       onChange={changed}
       onRename={async (nickname) => {
         await client.updateLoan(current.loan.id, { nickname });
@@ -210,6 +241,7 @@ export function TrackerApp({ client, initialLoan, bindSelect, onChange, onSelect
 interface ScreensProps {
   client: LoanClient;
   picker: React.ReactNode;
+  footer: React.ReactNode;
   onChange(): void;
   onRename(nickname: string): Promise<void>;
   onArchive(archived: boolean): Promise<void>;
@@ -217,7 +249,7 @@ interface ScreensProps {
 }
 
 /** The screens for one loan. Which ones appear depends on its type and modules. */
-function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }: ScreensProps) {
+function LoanScreens({ client, picker, footer, onChange, onRename, onArchive, onDelete }: ScreensProps) {
   const [state, setStateRaw] = useState<StateView | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
@@ -254,6 +286,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
       <div className="mt-page">
         <Header title="Loans">{picker}</Header>
         {error ? <div className="mt-note bad">{error.message}</div> : <div className="mt-empty">Loading…</div>}
+        {footer}
       </div>
     );
   }
@@ -449,6 +482,7 @@ function LoanScreens({ client, picker, onChange, onRename, onArchive, onDelete }
       {shown === 'equity' && state.analysis && <EquityView state={state} client={client} onState={setState} />}
       {shown === 'escrow' && state.analysis && <EscrowView state={state} client={client} onState={setState} />}
       {shown === 'details' && <DetailsView state={state} client={client} onState={setState} />}
+      {footer}
     </div>
   );
 }

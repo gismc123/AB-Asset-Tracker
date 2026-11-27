@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { build } from 'esbuild';
 
 const outdir = 'dist/ui';
+const { version } = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 fs.mkdirSync(outdir, { recursive: true });
 
 const common = {
@@ -12,7 +13,7 @@ const common = {
   format: 'iife',
   target: ['es2020', 'chrome100', 'firefox100', 'safari15'],
   jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': '"production"' },
+  define: { 'process.env.NODE_ENV': '"production"', __APP_VERSION__: JSON.stringify(version) },
   minify: true,
   sourcemap: false,
   legalComments: 'none',
